@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VideoHub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: { extend: { colors: { indigo: { 600: '#4f46e5', 700: '#4338ca' }, gray: { 950: '#030712' } } } }
+        }
+    </script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+          "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+          "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js",
+          "firebase/storage": "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js",
+          "lucide-react": "https://esm.sh/lucide-react@0.344.0"
+        }
+      }
+    </script>
+    <style>
+        body { -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        .animate-fade-in-out { animation: fadeInOut 4s ease-in-out; }
+        @keyframes fadeInOut { 0%, 100% { opacity: 0; transform: translateY(-20px); } 15%, 85% { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-950 min-h-screen text-gray-900 dark:text-white font-sans transition-colors duration-200">
+    <div id="root"></div>
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, signInWithRedirect, getRedirectResult, GoogleAuthProvider } from 'firebase/auth';
+        import { getFirestore, doc, getDoc, addDoc, onSnapshot, collection, query, where, getDocs, serverTimestamp, setDoc, updateDoc, orderBy, deleteDoc } from 'firebase/firestore';
+        import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+        import { Trash2, Smartphone, Monitor, Laptop, Shield, ThumbsUp, Home, Film, Upload, User, X, LogOut, Copy, Info, AlertTriangle } from 'lucide-react';
+
+        // --- FIREBASE CONFIG ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyBgMmLBi1N3gOEzQwVa9y94N_kQiieXlMM",
+            authDomain: "reelstream-b730e.firebaseapp.com",
+            projectId: "reelstream-b730e",
+            storageBucket: "reelstream-b730e.firebasestorage.app",
+            messagingSenderId: "1099473053212",
+            appId: "1:1099473053212:web:5d98b4b26a7dcd95bb61d9",
+            measurementId: "G-D8VSN8WDTC"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const storage = getStorage(app);
+        const appId = firebaseConfig.appId;
+
+        // --- UTILS ---
+        const getDeviceInfo = () => {
+            const ua = navigator.userAgent;
+            let deviceType = 'Desktop', icon = Monitor;
+            if (/mobile/i.test(ua)) { deviceType = 'Mobile'; icon = Smartphone; }
+            else if (/tablet|iPad/i.test(ua)) { deviceType = 'Tablet'; icon = Laptop; }
+            return { name: deviceType, icon };
+        };
+
+        // --- COMPONENTS ---
+        const Message = ({ message }) => {
+            if (!message) return null;
+            const bgColor = message.type === 'error' ? 'bg-red-500' : 'bg-green-500';
+            return (<div className={`fixed top-5 left-0 right-0 mx-auto w-max max-w-[90%] ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in-out z-[9999] text-center`}>{message.text}</div>);
+        };
+
+        const SubscriberCount = ({ uploaderId }) => {
+            const [count, setCount] = useState(0);
+            useEffect(() => {
+                if (!uploaderId) return;
+                const q = query(collection(db, `artifacts/${appId}/public/data/subscribers`), where("uploaderId", "==", uploaderId));
+                const unsub = onSnapshot(q, snap => setCount(snap.size));
+                return () => unsub();
+            }, [uploaderId]);
+            return <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">{count} subs</span>;
+        };
+
+        const LikeButton = ({ videoId, currentUser, showMessage }) => {
+            const [likes, setLikes] = useState(0);
+            const [isLiked, setIsLiked] = useState(false);
+            const path = `artifacts/${appId}/public/data/videos/${videoId}/likes`;
+            useEffect(() => {
+                if (!videoId) return;
+                const q = query(collection(db, path));
+                const unsub = onSnapshot(q, snap => {
+                    setLikes(snap.size);
+                    if (currentUser) setIsLiked(snap.docs.some(d => d.id === currentUser.uid));
+                });
+                return () => unsub();
+            }, [videoId, currentUser]);
+            const toggleLike = async (e) => {
+                e.stopPropagation();
+                if (!currentUser || currentUser.isAnonymous) return showMessage("Login to like!", "error");
+                const ref = doc(db, path, currentUser.uid);
+                if (isLiked) await deleteDoc(ref);
+                else await setDoc(ref, { ts: serverTimestamp() });
+            };
+            return (<button onClick={toggleLike} className={`flex items-center space-x-1 px-3 py-1 rounded-full text-sm ${isLiked ? 'bg-pink-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}><ThumbsUp size={14} className={isLiked ? 'fill-current' : ''} /><span>{likes}</span></button>);
+        };
+
+        // --- TOP BAR ---
+        const TopBar = ({ currentUser, userProfile, onLogout, setView, onNavChannel, search, setSearch, openSettings }) => {
+            const [menuOpen, setMenuOpen] = useState(false);
+            return (
+                <nav className="bg-white dark:bg-gray-900 p-3 shadow-md sticky top-0 z-40 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <h1 onClick={() => setView('home')} className="text-xl font-bold text-indigo-600 dark:text-indigo-400 cursor-pointer">VideoHub</h1>
+                    <div className="flex-1 mx-3"><input type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} className="w-full px-3 py-1.5 rounded-full bg-gray-100 dark:bg-gray-800 text-sm border-transparent focus:border-indigo-500 focus:ring-0" /></div>
+                    {currentUser ? (
+                        <div className="relative">
+                            <img src={userProfile?.profilePictureUrl || `https://placehold.co/40x40/7c3aed/fff?text=${userProfile?.name?.[0] || 'U'}`} className="w-8 h-8 rounded-full object-cover border border-gray-300 dark:border-gray-600" onClick={() => setMenuOpen(!menuOpen)} />
+                            {menuOpen && (
+                                <div className="absolute right-0 top-10 w-40 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                                    <button onClick={() => { onNavChannel(currentUser.uid); setMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">My Channel</button>
+                                    <button onClick={() => { openSettings(); setMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700">Settings</button>
+                                    <button onClick={() => { onLogout(); setMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700">Logout</button>
+                                </div>
+                            )}
+                        </div>
+                    ) : (<div className="w-8"></div>)}
+                </nav>
+            );
+        };
+
+        // --- BOTTOM NAV ---
+        const BottomNav = ({ setView, onNavBytes, onNavChannel, currentUser }) => (
+            <nav className="fixed bottom-0 w-full h-14 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 flex justify-around items-center z-50 pb-safe">
+                <button onClick={() => setView('home')} className="flex flex-col items-center text-gray-500 hover:text-indigo-500"><Home size={20}/><span className="text-[10px]">Home</span></button>
+                <button onClick={onNavBytes} className="flex flex-col items-center text-gray-500 hover:text-indigo-500"><Film size={20}/><span className="text-[10px]">Bytes</span></button>
+                {currentUser && <button onClick={() => setView('upload')} className="flex flex-col items-center text-gray-500 hover:text-indigo-500"><Upload size={20}/><span className="text-[10px]">Upload</span></button>}
+                <button onClick={() => currentUser ? onNavChannel(currentUser.uid) : setView('landing')} className="flex flex-col items-center text-gray-500 hover:text-indigo-500"><User size={20}/><span className="text-[10px]">{currentUser ? 'You' : 'Login'}</span></button>
+            </nav>
+        );
+
+        // --- VIEWS ---
+        const AuthView = ({ mode, onLogin, onSignup, onGoogle, setView }) => {
+            const [email, setEmail] = useState('');
+            const [pass, setPass] = useState('');
+            const [domain, setDomain] = useState('');
+            useEffect(() => { const match = window.location.href.match(/^(?:blob:)?(?:https?:\/\/)?([^\/]+)/); setDomain(match ? match[1] : window.location.host); }, []);
+            const copyDomain = () => { navigator.clipboard.writeText(domain); alert("Domain copied! Add to Firebase Console."); };
+            return (
+                <div className="p-6 max-w-sm mx-auto mt-10 bg-white dark:bg-gray-800 rounded-xl shadow-lg">
+                    <h2 className="text-2xl font-bold mb-6 text-center">{mode === 'login' ? 'Login' : 'Sign Up'}</h2>
+                    <button onClick={onGoogle} className="w-full py-2 bg-white text-gray-700 border rounded mb-4 flex justify-center items-center gap-2 font-medium"><span className="text-blue-500 font-bold">G</span> Sign in with Google</button>
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded text-xs mb-4 border border-yellow-200 dark:border-yellow-800">
+                        <p className="font-bold text-yellow-700 dark:text-yellow-500 mb-1">Deployment Help</p>
+                        <p className="mb-1">Add this domain to Firebase Auth settings:</p>
+                        <code className="block bg-black/5 p-1 rounded mb-2 break-all font-mono select-all">{domain}</code>
+                        <button onClick={copyDomain} className="text-blue-500 font-bold flex items-center justify-center w-full bg-blue-50 dark:bg-blue-900/30 py-1 rounded"><Copy size={12} className="mr-1"/> Copy Domain</button>
+                    </div>
+                    <div className="text-center text-gray-400 text-sm mb-4">- OR -</div>
+                    <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} className="w-full p-2 mb-3 border rounded dark:bg-gray-700 border-gray-300 dark:border-gray-600" />
+                    <input type="password" placeholder="Password" value={pass} onChange={e=>setPass(e.target.value)} className="w-full p-2 mb-4 border rounded dark:bg-gray-700 border-gray-300 dark:border-gray-600" />
+                    <button onClick={() => (mode==='login'?onLogin:onSignup)(email, pass)} className="w-full py-2 bg-indigo-600 text-white rounded font-medium">{mode==='login'?'Login':'Sign Up'}</button>
+                    <button onClick={() => setView('landing')} className="w-full mt-2 text-sm text-gray-500">Cancel</button>
+                </div>
+            );
+        };
+
+        const HomeView = ({ items, onWatch, onNavChannel, type }) => (
+            <div className="p-2 pb-20 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {items.length === 0 && <p className="text-center col-span-full text-gray-500 mt-10">No videos yet.</p>}
+                {items.map(item => (
+                    <div key={item.id} className="bg-white dark:bg-gray-800 rounded-lg overflow-hidden shadow cursor-pointer" onClick={() => onWatch(item)}>
+                        <img src={item.thumbnailUrl} className="w-full h-48 object-cover" onError={e => e.target.src='https://placehold.co/600x400?text=Error'}/>
+                        <div className="p-3">
+                            <h3 className="font-bold truncate">{item.title}</h3>
+                            <div className="flex justify-between items-center mt-1 text-xs text-gray-500">
+                                <span onClick={e => {e.stopPropagation(); onNavChannel(item.uploaderId)}} className="hover:text-indigo-500">{item.uploaderName}</span>
+                                <SubscriberCount uploaderId={item.uploaderId}/>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+
+        const WatchView = ({ video, onBack, currentUser, showMessage, onSubscribe, following, onNavChannel }) => {
+            const [comments, setComments] = useState([]);
+            const [txt, setTxt] = useState('');
+            useEffect(() => {
+                const q = query(collection(db, `artifacts/${appId}/public/data/videos/${video.id}/comments`), orderBy('createdAt', 'desc'));
+                return onSnapshot(q, s => setComments(s.docs.map(d => ({id:d.id, ...d.data()}))));
+            }, [video.id]);
+            const postComment = async (e) => {
+                e.preventDefault();
+                if(!currentUser || currentUser.isAnonymous) return showMessage("Login to comment", "error");
+                await addDoc(collection(db, `artifacts/${appId}/public/data/videos/${video.id}/comments`), { text: txt, uploaderId: currentUser.uid, uploaderName: currentUser.displayName || 'User', createdAt: serverTimestamp() });
+                setTxt('');
+            };
+            const deleteComment = async (id) => { if(confirm("Delete?")) await deleteDoc(doc(db, `artifacts/${appId}/public/data/videos/${video.id}/comments`, id)); }
+            const isSubbed = following.includes(video.uploaderId);
+            return (
+                <div className="pb-20">
+                    <div className="sticky top-0 bg-black z-30">
+                        <video src={video.videoUrl} controls autoPlay className="w-full max-h-[50vh]"></video>
+                        <button onClick={onBack} className="absolute top-2 left-2 bg-black/50 text-white p-1 rounded-full"><X size={20}/></button>
+                    </div>
+                    <div className="p-4">
+                        <h1 className="text-xl font-bold text-gray-900 dark:text-white">{video.title}</h1>
+                        <div className="flex justify-between items-center mt-2">
+                            <div className="flex items-center gap-2 cursor-pointer" onClick={() => onNavChannel(video.uploaderId)}><span className="font-semibold text-indigo-500">{video.uploaderName}</span><SubscriberCount uploaderId={video.uploaderId} /></div>
+                            <div className="flex gap-2 items-center">
+                                <LikeButton videoId={video.id} currentUser={currentUser} showMessage={showMessage} />
+                                {currentUser && currentUser.uid !== video.uploaderId && (<button onClick={() => onSubscribe(video.uploaderId)} className={`px-3 py-1 rounded-full text-sm text-white ${isSubbed ? 'bg-gray-500' : 'bg-red-600'}`}>{isSubbed ? 'Unsub' : 'Sub'}</button>)}
+                            </div>
+                        </div>
+                        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">{video.description}</p>
+                        <div className="mt-6 border-t pt-4 dark:border-gray-700">
+                            <h3 className="font-bold mb-2 text-gray-900 dark:text-white">Comments</h3>
+                            <form onSubmit={postComment} className="flex gap-2 mb-4">
+                                <input value={txt} onChange={e=>setTxt(e.target.value)} placeholder="Add a comment..." className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-full px-3 py-1 text-sm dark:text-white" />
+                                <button className="text-indigo-500 font-bold text-sm">Post</button>
+                            </form>
+                            <div className="space-y-3">
+                                {comments.map(c => (
+                                    <div key={c.id} className="flex justify-between items-start bg-gray-50 dark:bg-gray-800/50 p-2 rounded">
+                                        <div><p className="text-xs font-bold text-gray-500">{c.uploaderName}</p><p className="text-sm text-gray-800 dark:text-gray-200">{c.text}</p></div>
+                                        {currentUser?.uid === c.uploaderId && <button onClick={()=>deleteComment(c.id)} className="text-gray-400 hover:text-red-500"><Trash2 size={14}/></button>}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const validateVideoFile = (file, type) => {
+            return new Promise((resolve, reject) => {
+                if (type !== 'byte') { resolve({ success: true }); return; }
+                try {
+                    const video = document.createElement('video');
+                    video.preload = 'metadata';
+                    video.onloadedmetadata = () => {
+                        window.URL.revokeObjectURL(video.src);
+                        const { duration, videoWidth, videoHeight } = video;
+                        if (videoWidth > videoHeight) { resolve({ success: false, error: "Bytes must be vertical." }); return; }
+                        if (duration > 180) { resolve({ success: false, error: "Bytes must be < 3 mins." }); return; }
+                        resolve({ success: true });
+                    };
+                    video.onerror = () => { window.URL.revokeObjectURL(video.src); reject(new Error("Video error.")); };
+                    video.src = window.URL.createObjectURL(file);
+                } catch (err) { reject(err); }
+            });
+        };
+
+        const UploadForm = ({ onUpload, showMessage, defaultType }) => {
+            const [uploadProgress, setUploadProgress] = useState(0);
+            const [isUploading, setIsUploading] = useState(false);
+            const [fileType, setFileType] = useState(defaultType || 'video');
+            useEffect(() => { setFileType(defaultType || 'video'); }, [defaultType]);
+
+            const handleSubmit = async (event) => {
+                event.preventDefault();
+                if (isUploading) return;
+                const form = event.target;
+                const videoFile = form.querySelector('#video-file').files[0];
+                const thumbnailFile = form.querySelector('#thumbnail-file').files[0];
+                const title = form.querySelector('#video-title').value;
+                const description = form.querySelector('#video-description').value;
+                if (!videoFile || !thumbnailFile || !title) { showMessage({ text: 'Fill all fields.', type: 'error' }); return; }
+                
+                try {
+                    const validation = await validateVideoFile(videoFile, fileType);
+                    if (!validation.success) { showMessage({ text: validation.error, type: 'error' }); return; }
+                } catch (err) { showMessage({ text: 'File error.', type: 'error' }); return; }
+
+                setIsUploading(true);
+                const uploadFile = (file, path) => new Promise((res, rej) => { 
+                    const task = uploadBytesResumable(ref(storage, path), file); 
+                    task.on('state_changed', s => setUploadProgress((s.bytesTransferred / s.totalBytes) * 100), rej, async () => res(await getDownloadURL(task.snapshot.ref))); 
+                });
+                try {
+                    const timestamp = Date.now();
+                    const [vidUrl, thumbUrl] = await Promise.all([
+                        uploadFile(videoFile, `content/${auth.currentUser.uid}/${timestamp}_${videoFile.name}`),
+                        uploadFile(thumbnailFile, `content/${auth.currentUser.uid}/${timestamp}_${thumbnailFile.name}`)
+                    ]);
+                    await addDoc(collection(db, `artifacts/${appId}/public/data/${fileType}s`), { title, description, videoUrl: vidUrl, thumbnailUrl: thumbUrl, uploaderId: auth.currentUser.uid, uploaderName: auth.currentUser.displayName, createdAt: serverTimestamp() });
+                    showMessage({ text: 'Uploaded!', type: 'success' });
+                } catch (e) { showMessage({ text: 'Upload failed', type: 'error' }); }
+                setIsUploading(false); setUploadProgress(0); form.reset();
+            };
+            return (
+                <div className="max-w-2xl mx-auto p-4 sm:p-6 bg-white dark:bg-gray-800 rounded-lg mt-10 shadow-xl">
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Upload</h2>
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        <select value={fileType} onChange={(e) => setFileType(e.target.value)} className="w-full px-3 py-2 dark:bg-gray-700 border rounded"><option value="video">Video</option><option value="byte">Byte</option></select>
+                        <input type="text" id="video-title" placeholder="Title" required className="w-full px-3 py-2 dark:bg-gray-700 border rounded" />
+                        <textarea id="video-description" rows="3" placeholder="Description" required className="w-full px-3 py-2 dark:bg-gray-700 border rounded"></textarea>
+                        <div><label className="block text-sm">Video</label><input type="file" id="video-file" accept="video/*" required className="w-full text-sm" /></div>
+                        <div><label className="block text-sm">Thumbnail</label><input type="file" id="thumbnail-file" accept="image/*" required className="w-full text-sm" /></div>
+                        {isUploading && <div className="w-full bg-gray-200 h-2.5 rounded"><div className="bg-indigo-600 h-2.5 rounded" style={{ width: `${uploadProgress}%` }}></div></div>}
+                        <button type="submit" disabled={isUploading} className="w-full py-2 px-4 bg-indigo-600 text-white rounded">{isUploading ? `Uploading...` : 'Upload'}</button>
+                    </form>
+                </div>
+            );
+        };
+
+        const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavChannel, currentUser, following }) => {
+            const [idx, setIdx] = useState(startIndex);
+            const vidRef = useRef(null);
+            useEffect(() => { if(vidRef.current) vidRef.current.play().catch(console.error); }, [idx]);
+            if (!bytes[idx]) return null;
+            const b = bytes[idx];
+            const isSubbed = following.includes(b.uploaderId);
+            return (
+                <div className="relative w-full h-[calc(100vh-68px)] bg-black flex items-center justify-center">
+                    <button onClick={onBack} className="absolute top-4 left-4 z-30 px-4 py-2 bg-gray-800/50 text-white rounded-full">Back</button>
+                    <div className="relative w-full h-full flex items-center justify-center">
+                        <video ref={vidRef} src={b.videoUrl} autoPlay loop muted playsInline className="w-full h-full object-contain"></video>
+                        <div className="absolute bottom-0 left-0 p-4 text-white z-20 w-full bg-gradient-to-t from-black/80">
+                            <h3 className="font-bold">{b.title}</h3>
+                            <div className="flex justify-between mt-2">
+                                <span onClick={()=>onNavChannel(b.uploaderId)}>{b.uploaderName}</span>
+                                {currentUser?.uid !== b.uploaderId && <button onClick={()=>onSubscribe(b.uploaderId)} className={`px-3 py-1 rounded-full text-sm ${isSubbed?'bg-gray-500':'bg-red-600'}`}>{isSubbed?'Unsub':'Sub'}</button>}
+                            </div>
+                        </div>
+                    </div>
+                    <button onClick={()=>setIdx(i=>Math.max(0,i-1))} className="absolute left-2 top-1/2 bg-gray-800/50 p-2 rounded-full text-white">Prev</button>
+                    <button onClick={()=>setIdx(i=>Math.min(bytes.length-1,i+1))} className="absolute right-2 top-1/2 bg-gray-800/50 p-2 rounded-full text-white">Next</button>
+                </div>
+            );
+        };
+
+        const ChannelPage = ({ userId, currentUser, allVideos, allBytes, onWatch, onNavigateToChannel, onSubscribe, onEditProfile, followingList }) => {
+            const [profile, setProfile] = useState(null);
+            const [isLoading, setIsLoading] = useState(true);
+            useEffect(() => { if (!userId) return; const userRef = doc(db, `artifacts/${appId}/public/data/users`, userId); onSnapshot(userRef, (doc) => { if (doc.exists()) setProfile({ id: doc.id, ...doc.data() }); setIsLoading(false); }); }, [userId]);
+            if (isLoading) return <div className="text-center py-20">Loading...</div>;
+            if (!profile) return <div className="text-center py-20">Channel not found.</div>;
+            const userVideos = allVideos.filter(v => v.uploaderId === userId);
+            const isSubscribed = followingList.includes(userId);
+            return (
+                <div className="p-4">
+                    <div className="flex items-center gap-4 mb-6">
+                        <img src={profile.profilePictureUrl} className="w-20 h-20 rounded-full border-4 border-indigo-500" onError={e=>e.target.src=`https://placehold.co/128?text=${profile.name[0]}`}/>
+                        <div>
+                            <h1 className="text-2xl font-bold">{profile.name}</h1>
+                            <SubscriberCount uploaderId={userId} />
+                            {currentUser?.uid === userId ? <button onClick={()=>onEditProfile(profile)} className="px-4 py-1 bg-indigo-600 text-white rounded mt-2 text-sm">Edit</button> : <button onClick={()=>onSubscribe(userId)} className={`px-4 py-1 text-white rounded mt-2 text-sm ${isSubscribed?'bg-gray-500':'bg-red-600'}`}>{isSubscribed?'Unsub':'Sub'}</button>}
+                        </div>
+                    </div>
+                    <h2 className="text-xl font-bold mb-4">Videos</h2>
+                    <div className="grid grid-cols-2 gap-4">{userVideos.map(v => <div key={v.id} onClick={()=>onWatch(v)} className="bg-white dark:bg-gray-800 rounded overflow-hidden shadow"><img src={v.thumbnailUrl} className="w-full h-32 object-cover"/><p className="p-2 text-sm truncate">{v.title}</p></div>)}</div>
+                </div>
+            );
+        };
+
+        // --- MAIN APP ---
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [profile, setProfile] = useState(null);
+            const [view, setView] = useState('landing'); 
+            const [msg, setMsg] = useState(null);
+            const [videos, setVideos] = useState([]);
+            const [allBytes, setAllBytes] = useState([]);
+            const [search, setSearch] = useState('');
+            const [watching, setWatching] = useState(null);
+            const [following, setFollowing] = useState([]);
+            const [viewingChannel, setViewingChannel] = useState(null);
+            const [authMode, setAuthMode] = useState('login');
+            const [theme, setTheme] = useState('system');
+            const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+            const [editingProfile, setEditingProfile] = useState(null);
+            const [bytesPlayerData, setBytesPlayerData] = useState({items:[], index:0});
+            const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+
+            const showMsg = (text, type='info') => { setMsg({text, type}); setTimeout(()=>setMsg(null), 3000); };
+
+            useEffect(() => {
+                getRedirectResult(auth).then(res => { if(res) { showMsg("Logged in!", "success"); setView('home'); } }).catch(e => showMsg(e.message, "error"));
+                return onAuthStateChanged(auth, async (u) => {
+                    if(u && !u.isAnonymous) {
+                        setUser(u);
+                        const userDoc = await getDoc(doc(db, `artifacts/${appId}/public/data/users`, u.uid));
+                        if(!userDoc.exists()) await setDoc(doc(db, `artifacts/${appId}/public/data/users`, u.uid), { name: u.displayName || 'User', email: u.email, profilePictureUrl: u.photoURL, createdAt: serverTimestamp() });
+                        onSnapshot(doc(db, `artifacts/${appId}/public/data/users`, u.uid), s => setProfile(s.data()));
+                        onSnapshot(query(collection(db, `artifacts/${appId}/public/data/subscribers`), where("subscriberId", "==", u.uid)), s => setFollowing(s.docs.map(d => d.data().uploaderId)));
+                        if (view === 'landing') setView('home');
+                    } else {
+                        setUser(null); setProfile(null); setFollowing([]);
+                        if (u?.isAnonymous) setView(v => v === 'landing' ? 'home' : v);
+                    }
+                });
+            }, []);
+
+            useEffect(() => {
+                onSnapshot(query(collection(db, `artifacts/${appId}/public/data/videos`)), s => setVideos(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>(b.createdAt?.toMillis()||0)-(a.createdAt?.toMillis()||0))));
+                onSnapshot(query(collection(db, `artifacts/${appId}/public/data/bytes`)), s => setAllBytes(s.docs.map(d => ({id:d.id, ...d.data()})).sort((a,b)=>(b.createdAt?.toMillis()||0)-(a.createdAt?.toMillis()||0))));
+            }, []);
+
+            useEffect(() => {
+                const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+                const apply = (t) => document.documentElement.classList.toggle('dark', t==='dark'||(t==='system'&&mediaQuery.matches));
+                apply(theme);
+            }, [theme]);
+
+            const filtered = videos.filter(v => v.title.toLowerCase().includes(search.toLowerCase()));
+            const loginGoogle = () => signInWithRedirect(auth, new GoogleAuthProvider());
+            const loginEmail = (e,p) => signInWithEmailAndPassword(auth,e,p).then(()=>setView('home')).catch(err=>showMsg(err.message, 'error'));
+            const signupEmail = (e,p) => createUserWithEmailAndPassword(auth,e,p).then(()=>setView('home')).catch(err=>showMsg(err.message, 'error'));
+            const logout = () => signOut(auth).then(()=>setView('landing'));
+            const toggleSub = async (uid) => {
+                const q = query(collection(db, `artifacts/${appId}/public/data/subscribers`), where("subscriberId", "==", user.uid), where("uploaderId", "==", uid));
+                const snap = await getDocs(q);
+                if(!snap.empty) await deleteDoc(snap.docs[0].ref);
+                else await addDoc(collection(db, `artifacts/${appId}/public/data/subscribers`), {subscriberId: user.uid, uploaderId: uid});
+            };
+
+            if (view === 'landing') return <LandingPage handleGuestLogin={()=>{signInAnonymously(auth); setView('home')}} setView={setView} setAuthMode={setAuthMode}/>;
+            if (view === 'authForm') return <AuthView mode={authMode} onLogin={loginEmail} onSignup={signupEmail} onGoogle={loginGoogle} setView={setView} />;
+            
+            return (
+                <div className="max-w-md mx-auto bg-white dark:bg-black min-h-screen shadow-2xl overflow-hidden relative">
+                    <Message message={msg} />
+                    {view !== 'watch' && <TopBar currentUser={user} userProfile={profile} onLogout={logout} setView={setView} search={search} setSearch={setSearch} onNavChannel={(uid)=>{setViewingChannel(uid); setView('channel')}} openSettings={()=>setIsSettingsModalOpen(true)}/>}
+                    
+                    <main className="min-h-screen pt-2 pb-16">
+                        {view === 'home' && <div className="p-2 pb-20 grid grid-cols-2 gap-4">{filtered.map(v => <div key={v.id} className="bg-white dark:bg-gray-800 rounded shadow overflow-hidden" onClick={()=>{setWatching(v); setView('watch')}}><img src={v.thumbnailUrl} className="w-full h-32 object-cover"/><div className="p-2 text-sm font-bold truncate">{v.title}</div></div>)}</div>}
+                        {view === 'watch' && <WatchView video={watching} onBack={()=>setView('home')} currentUser={user} showMessage={showMsg} onSubscribe={toggleSub} following={following} onNavChannel={(uid)=>{setViewingChannel(uid); setView('channel')}} />}
+                        {view === 'bytesPlayer' && <BytesPlayer bytes={bytesPlayerData.items} startIndex={bytesPlayerData.index} onBack={()=>setView('home')} onSubscribe={toggleSub} onNavChannel={(uid)=>{setViewingChannel(uid); setView('channel')}} currentUser={user} following={following} />}
+                        {view === 'channel' && <ChannelPage userId={viewingChannel} currentUser={user} allVideos={videos} allBytes={allBytes} onWatch={v=>{setWatching(v); setView('watch')}} onNavigateToChannel={id=>{setViewingChannel(id); setView('channel')}} onSubscribe={toggleSub} onEditProfile={p=>{setEditingProfile(p); setIsEditModalOpen(true)}} followingList={following} />}
+                         {view === 'upload' && <UploadForm onUpload={handleUpload} showMessage={showMsg} defaultType={defaultUploadType} />}
+                    </main>
+
+                    {view !== 'watch' && <BottomNav setView={setView} currentUser={user} onNavBytes={()=>{if(allBytes.length>0){setBytesPlayerData({items:allBytes,index:0});setView('bytesPlayer')}else showMsg("No Bytes yet")}} onNavChannel={(uid)=>{setViewingChannel(uid); setView('channel')}} />}
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
+
