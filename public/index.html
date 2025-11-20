@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VideoHub</title>
+    
+    <!-- 1. This loads a professional font (Inter) so it doesn't look generic -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- 2. This loads the Tailwind CSS engine -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 3. This configures Tailwind to use the new font and specific colors -->
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+          }
+        }
+      }
+    </script>
+  </head>
+  <body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white">
+    <div id="root"></div>
+  </body>
+</html>
+
+
