@@ -38,58 +38,88 @@ const getDeviceName = () => {
     return 'Unknown Device';
 };
 
-// --- Canvas Video Compression Helper ---
+// --- FIXED Canvas Video Compression Helper ---
 const compressVideo = (file, targetHeight, onProgress) => {
     return new Promise((resolve, reject) => {
         const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.src = URL.createObjectURL(file);
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'auto';
         
+        const videoUrl = URL.createObjectURL(file);
+        video.src = videoUrl;
+
+        const cleanup = () => {
+            URL.revokeObjectURL(videoUrl);
+            video.remove();
+        };
+
         video.onloadedmetadata = () => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             
-            // Calculate aspect ratio aspect
             const aspectRatio = video.videoWidth / video.videoHeight;
             canvas.height = targetHeight;
             canvas.width = Math.round(targetHeight * aspectRatio);
             
-            const stream = canvas.captureStream();
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            let stream;
+            try {
+                stream = canvas.captureStream(25); // Cap at 25 fps to prevent freezing
+            } catch (err) {
+                cleanup();
+                return reject(err);
+            }
+
+            let mediaRecorder;
+            try {
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            } catch (e) {
+                // Fallback mimeType if webm isn't supported natively
+                mediaRecorder = new MediaRecorder(stream);
+            }
+
             const chunks = [];
-            
-            mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0) chunks.push(e.data);
+            };
+
             mediaRecorder.onstop = () => {
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 const reader = new FileReader();
                 reader.readAsDataURL(blob);
                 reader.onloadend = () => {
-                    URL.revokeObjectURL(video.src);
+                    cleanup();
                     resolve({ dataUrl: reader.result, blobSize: blob.size });
                 };
             };
-            
-            mediaRecorder.start();
-            video.currentTime = 0;
-            video.play();
-            
-            const processFrame = () => {
-                if (video.paused || video.ended) {
+
+            video.onended = () => {
+                if (mediaRecorder.state !== 'inactive') {
                     mediaRecorder.stop();
-                    return;
                 }
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                if (onProgress) {
-                    onProgress(Math.round((video.currentTime / video.duration) * 100));
-                }
-                requestAnimationFrame(processFrame);
             };
-            
-            video.onplay = () => processFrame();
-            video.onerror = (err) => {
-                URL.revokeObjectURL(video.src);
+
+            video.play().then(() => {
+                mediaRecorder.start(100);
+                
+                const drawFrame = () => {
+                    if (video.paused || video.ended) return;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    if (onProgress && video.duration) {
+                        onProgress(Math.round((video.currentTime / video.duration) * 100));
+                    }
+                    requestAnimationFrame(drawFrame);
+                };
+                drawFrame();
+            }).catch((err) => {
+                cleanup();
                 reject(err);
-            };
+            });
+        };
+
+        video.onerror = (err) => {
+            cleanup();
+            reject(err);
         };
     });
 };
@@ -329,7 +359,6 @@ const UploadForm = ({ onUpload, showMessage, defaultType }) => {
         
         setSelectedFile(file);
         
-        // Detect video resolution
         const tempVideo = document.createElement('video');
         tempVideo.preload = 'metadata';
         tempVideo.src = URL.createObjectURL(file);
@@ -337,7 +366,6 @@ const UploadForm = ({ onUpload, showMessage, defaultType }) => {
             setDetectedHeight(tempVideo.videoHeight);
             URL.revokeObjectURL(tempVideo.src);
             
-            // Check Base64 overhead (~1.33x raw size) against 1MB limit (~750KB limit raw)
             if (file.size > 750000) {
                 setFileSizeExceeded(true);
             } else {
@@ -361,25 +389,28 @@ const UploadForm = ({ onUpload, showMessage, defaultType }) => {
         }
 
         setIsUploading(true);
-        await onUpload({ 
-            videoFile: selectedFile, 
-            thumbnailFile, 
-            title, 
-            description, 
-            type: fileType, 
-            targetResolution,
-            onProgress: setUploadProgress 
-        });
-        
-        setIsUploading(false); 
-        setUploadProgress(0); 
-        setShowCompressionOptions(false);
-        setFileSizeExceeded(false);
-        setSelectedFile(null);
-        form.reset();
+        try {
+            await onUpload({ 
+                videoFile: selectedFile, 
+                thumbnailFile, 
+                title, 
+                description, 
+                type: fileType, 
+                targetResolution,
+                onProgress: setUploadProgress 
+            });
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsUploading(false); 
+            setUploadProgress(0); 
+            setShowCompressionOptions(false);
+            setFileSizeExceeded(false);
+            setSelectedFile(null);
+            if (form) form.reset();
+        }
     };
 
-    // Available target options
     const resolutions = [
         { label: '144p', height: 144 },
         { label: '360p', height: 360 },
@@ -405,14 +436,12 @@ const UploadForm = ({ onUpload, showMessage, defaultType }) => {
                     <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Thumbnail Image (Optional)</label><input type="file" id="thumbnail-file" accept="image/*" className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 mt-1" /></div>
                 )}
 
-                {/* FILE EXCEEDS 1MB NOTIFICATION */}
                 {fileSizeExceeded && (
                     <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-500 text-sm">
                         ⚠️ <strong>File size exceeds 1 MB limit!</strong> Direct Base64 upload will fail. Select a lower resolution to compress it:
                     </div>
                 )}
 
-                {/* COMPRESSION RESOLUTION SELECTOR */}
                 {(showCompressionOptions || fileSizeExceeded) && (
                     <div className="space-y-2 p-4 bg-gray-100 dark:bg-gray-700/50 rounded-lg">
                         <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Compress Video Resolution:</p>
@@ -647,7 +676,6 @@ const SettingsModal = ({ theme, onThemeChange, onCancel, sessions, onRevokeSessi
                              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Link Accounts</h3>
                              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Connect other accounts to log in with them later.</p>
                              
-                             {/* GOOGLE */}
                              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                                 <div className="flex items-center">
                                     <div className="bg-white p-1 rounded-full mr-3"><GoogleIcon /></div>
@@ -660,7 +688,6 @@ const SettingsModal = ({ theme, onThemeChange, onCancel, sessions, onRevokeSessi
                                 )}
                              </div>
 
-                             {/* GITHUB */}
                              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                                 <div className="flex items-center">
                                     <div className="bg-white p-1 rounded-full mr-3"><GitHubIcon /></div>
@@ -673,7 +700,6 @@ const SettingsModal = ({ theme, onThemeChange, onCancel, sessions, onRevokeSessi
                                 )}
                              </div>
 
-                             {/* YAHOO */}
                              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                                 <div className="flex items-center">
                                     <div className="bg-white p-1 rounded-full mr-3"><YahooIcon /></div>
@@ -747,7 +773,6 @@ function App() {
     
     const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'system');
 
-    // Theme logic
     useEffect(() => {
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
         const applyTheme = (currentTheme) => {
@@ -918,7 +943,6 @@ function App() {
     const handleGoToUploadFromModal = () => { setIsNoBytesModalOpen(false); setDefaultUploadType('byte'); setView('upload'); };
     const handleSetView = (view) => { if (view !== 'upload') { setDefaultUploadType('video'); } setView(view); setSearchTerm(''); };
 
-    // --- BASE64 & IN-BROWSER CANVAS COMPRESSION UPLOADER ---
     const handleUpload = async ({ videoFile, thumbnailFile, title, description, type, targetResolution, onProgress }) => {
         if (!currentUser) { showMessageHandler('You must be logged in to upload.', 'error'); return; }
 
@@ -932,7 +956,6 @@ function App() {
         try { 
             let finalVideoUrl = '';
 
-            // 1. Process Video Payload
             if (targetResolution) {
                 if (onProgress) onProgress(10);
                 showMessageHandler(`Compressing video to ${targetResolution}p...`, 'info');
@@ -944,14 +967,13 @@ function App() {
                 finalVideoUrl = compressionResult.dataUrl;
                 
                 if (compressionResult.blobSize > 750000) {
-                    showMessageHandler(`Warning: Even compressed, this video might exceed Firestore's 1MB limit. Try a lower resolution like 144p or 360p.`, 'error');
+                    showMessageHandler(`Warning: Compressed video exceeds 1MB limit. Try 144p or 360p.`, 'error');
                 }
             } else {
                 if (onProgress) onProgress(50);
                 finalVideoUrl = await fileToBase64(videoFile);
             }
 
-            // 2. Process Thumbnail
             let thumbnailUrl = null;
             if (thumbnailFile) { 
                 thumbnailUrl = await fileToBase64(thumbnailFile); 
@@ -963,7 +985,6 @@ function App() {
             
             if (onProgress) onProgress(95);
 
-            // 3. Write Document to Firestore
             await addDoc(collection(db, `${type}s`), { 
                 title, 
                 description, 
@@ -979,7 +1000,7 @@ function App() {
             handleSetView('home'); 
         } catch (e) { 
             console.error(e); 
-            showMessageHandler('Upload failed. Compressed payload exceeds 1MB Firestore limit.', 'error'); 
+            showMessageHandler('Upload failed. Try a lower resolution like 144p.', 'error'); 
         }
     };
 
