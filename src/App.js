@@ -38,7 +38,7 @@ const getDeviceName = () => {
     return 'Unknown Device';
 };
 
-// --- Canvas Compression ---
+// --- Canvas Compression Helper ---
 const compressVideo = (file, targetHeight, onProgress) => {
     return new Promise((resolve, reject) => {
         const video = document.createElement('video');
@@ -501,7 +501,6 @@ const WatchView = ({ video, onBack, onSubscribe, onNavigateToChannel, currentUse
     );
 };
 
-// --- UPDATED BYTES PLAYER WITH LIKES, COMMENTS DRAWER, AND CREATOR CONTROLS ---
 const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChannel, currentUser, showMessage }) => {
     const [currentIndex, setCurrentIndex] = useState(startIndex);
     const [likesCount, setLikesCount] = useState(0);
@@ -528,7 +527,6 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
 
     useEffect(() => { if (videoRef.current) videoRef.current.play().catch(() => {}); }, [currentIndex]);
 
-    // Live Likes Listener
     useEffect(() => {
         if (!currentByte) return;
         const likesQuery = query(collection(db, 'likes'), where("contentId", "==", currentByte.id));
@@ -541,7 +539,6 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
         return () => unsubscribe();
     }, [currentByte, currentUser]);
 
-    // Live Comments Listener
     useEffect(() => {
         if (!currentByte || !showComments) return;
         const commentsQuery = query(collection(db, `bytes/${currentByte.id}/comments`));
@@ -590,16 +587,13 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
     if (!currentByte) return null;
 
     return (
-        <div className="relative w-full h-[calc(100vh-65px)] bg-black flex items-center justify-center overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-            {/* Top Back Button */}
+        <div className="relative w-full h-screen bg-black flex items-center justify-center overflow-hidden pb-16" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <button onClick={onBack} className="absolute top-4 left-4 z-30 px-4 py-2 bg-gray-900/60 backdrop-blur-md text-white rounded-full hover:bg-gray-800 text-sm font-semibold">&larr; Back</button>
             
             <div className="relative w-full sm:w-auto h-full max-w-sm flex items-center justify-center">
                 <video ref={videoRef} key={currentByte.id} src={currentByte.videoUrl} autoPlay loop muted playsInline className="w-full h-full object-contain"></video>
                 
-                {/* Right Action Side Bar (Like & Comment Buttons) */}
                 <div className="absolute right-3 bottom-24 z-30 flex flex-col items-center space-y-6">
-                    {/* Like Button */}
                     <button onClick={handleToggleLike} className="flex flex-col items-center group">
                         <div className={`p-3 rounded-full backdrop-blur-md transition-all active:scale-90 ${hasLiked ? 'bg-red-600 text-white' : 'bg-gray-900/60 text-white hover:bg-gray-800'}`}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill={hasLiked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
@@ -607,7 +601,6 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
                         <span className="text-white text-xs font-bold mt-1 shadow-sm">{likesCount}</span>
                     </button>
 
-                    {/* Comment Button */}
                     <button onClick={() => setShowComments(!showComments)} className="flex flex-col items-center group">
                         <div className="p-3 rounded-full bg-gray-900/60 backdrop-blur-md text-white hover:bg-gray-800 transition-all active:scale-90">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
@@ -616,8 +609,7 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
                     </button>
                 </div>
 
-                {/* Bottom Video Metadata & Channel Link */}
-                <div className="absolute bottom-16 left-0 right-12 p-4 text-white z-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent w-full">
+                <div className="absolute bottom-20 left-0 right-14 p-4 text-white z-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent w-full">
                     <div className="flex items-center space-x-3 mb-2">
                         <div onClick={() => onNavigateToChannel(currentByte.uploaderId)} className="flex items-center space-x-2 cursor-pointer group">
                             <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white border-2 border-indigo-400 group-hover:scale-105 transition-transform">
@@ -641,7 +633,6 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
                 </div>
             </div>
 
-            {/* Slide-Up Comments Drawer */}
             {showComments && (
                 <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gray-900 border-t border-gray-700 rounded-t-2xl z-40 p-4 flex flex-col shadow-2xl animate-in slide-in-from-bottom">
                     <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-800">
@@ -671,7 +662,6 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
                 </div>
             )}
 
-            {/* Desktop Navigation Arrows */}
             <button onClick={goToPrev} disabled={currentIndex === 0} className="hidden sm:block absolute left-4 top-1/2 -translate-y-1/2 z-30 p-3 bg-gray-900/60 text-white rounded-full disabled:opacity-20 hover:bg-gray-800"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg></button>
             <button onClick={goToNext} disabled={currentIndex === bytes.length - 1} className="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 z-30 p-3 bg-gray-900/60 text-white rounded-full disabled:opacity-20 hover:bg-gray-800"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></button>
         </div>
@@ -1210,11 +1200,20 @@ function App() {
         <div className="bg-gray-100 dark:bg-gray-950 min-h-screen text-gray-900 dark:text-white font-sans">
             <style>{`.animate-fade-in-out { animation: fadeInOut 4s ease-in-out; } @keyframes fadeInOut { 0%, 100% { opacity: 0; transform: translateY(-20px); } 15%, 85% { opacity: 1; transform: translateY(0); } }`}</style>
             <Message message={message} />
-            {view !== 'landing' && view !== 'authForm' && <Navbar currentUser={currentUser} currentUserProfile={currentUserProfile} onLogout={handleLogout} onSetView={handleSetView} onNavigateToChannel={handleNavigateToChannel} onNavigateToBytes={handleNavigateToBytes} searchTerm={searchTerm} onSearchChange={setSearchTerm} onOpenSettings={() => setIsSettingsModalOpen(true)} showMessage={showMessageHandler} />}
-            {view !== 'landing' && view !== 'authForm' && <BottomNav currentUser={currentUser} currentUserProfile={currentUserProfile} currentView={view} onSetView={handleSetView} onNavigateToBytes={handleNavigateToBytes} onNavigateToChannel={handleNavigateToChannel} showMessage={showMessageHandler} />}
+            
+            {/* Hides Navbar on Bytes Player view */}
+            {view !== 'landing' && view !== 'authForm' && view !== 'bytesPlayer' && (
+                <Navbar currentUser={currentUser} currentUserProfile={currentUserProfile} onLogout={handleLogout} onSetView={handleSetView} onNavigateToChannel={handleNavigateToChannel} onNavigateToBytes={handleNavigateToBytes} searchTerm={searchTerm} onSearchChange={setSearchTerm} onOpenSettings={() => setIsSettingsModalOpen(true)} showMessage={showMessageHandler} />
+            )}
+            
+            {view !== 'landing' && view !== 'authForm' && (
+                <BottomNav currentUser={currentUser} currentUserProfile={currentUserProfile} currentView={view} onSetView={handleSetView} onNavigateToBytes={handleNavigateToBytes} onNavigateToChannel={handleNavigateToChannel} showMessage={showMessageHandler} />
+            )}
+            
             {isEditModalOpen && <EditProfileModal userProfile={editingProfile} onSave={handleUpdateProfile} onCancel={handleCloseEditModal} />}
             {isNoBytesModalOpen && <NoBytesModal onGoToUpload={handleGoToUploadFromModal} onCancel={() => setIsNoBytesModalOpen(false)} />}
             {isSettingsModalOpen && <SettingsModal theme={theme} onThemeChange={handleThemeChange} onCancel={() => setIsSettingsModalOpen(false)} currentUser={currentUser} onLinkAccount={handleLinkAccount} sessions={sessions} onRevokeSession={handleRevokeSession} />}
+            
             <main className={view === 'bytesPlayer' ? '' : 'container mx-auto max-w-7xl px-2'}>{renderContent()}</main>
         </div>
     );
