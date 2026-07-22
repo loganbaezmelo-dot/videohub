@@ -501,7 +501,7 @@ const WatchView = ({ video, onBack, onSubscribe, onNavigateToChannel, currentUse
     );
 };
 
-// --- BYTES PLAYER: READS FROM LIVE ALLBYTES + FIXES COMMENT SAVING ---
+// --- BYTES PLAYER: FLAT ROOT COLLECTION COMMENTS FIX ---
 const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChannel, currentUser, currentUserProfile, showMessage }) => {
     const [currentIndex, setCurrentIndex] = useState(startIndex);
     const [likesCount, setLikesCount] = useState(0);
@@ -541,10 +541,10 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
         return () => unsubscribe();
     }, [currentByte, currentUser]);
 
-    // Comments Listener
+    // Comments Listener (Queries root 'comments' collection to avoid subcollection permission blocks)
     useEffect(() => {
         if (!currentByte || !showComments) return;
-        const commentsQuery = query(collection(db, `bytes/${currentByte.id}/comments`));
+        const commentsQuery = query(collection(db, 'comments'), where("byteId", "==", currentByte.id));
         const unsubscribe = onSnapshot(commentsQuery, (snapshot) => {
             const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
             list.sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
@@ -573,7 +573,8 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
 
         try {
             const authorName = currentUserProfile?.name || currentUser.displayName || 'User';
-            await addDoc(collection(db, `bytes/${currentByte.id}/comments`), {
+            await addDoc(collection(db, 'comments'), {
+                byteId: currentByte.id,
                 text: newCommentText.trim(),
                 userName: authorName,
                 userId: currentUser.uid,
@@ -1077,7 +1078,6 @@ function App() {
         }
     };
 
-    // FIXED: Checks live allBytes array directly
     const handleNavigateToBytes = () => { 
         if (allBytes.length > 0) { 
             setBytesStartIndex(0); 
