@@ -38,7 +38,7 @@ const getDeviceName = () => {
     return 'Unknown Device';
 };
 
-// --- FIXED Canvas Video Compression Helper ---
+// --- Canvas Compression ---
 const compressVideo = (file, targetHeight, onProgress) => {
     return new Promise((resolve, reject) => {
         const video = document.createElement('video');
@@ -64,7 +64,7 @@ const compressVideo = (file, targetHeight, onProgress) => {
             
             let stream;
             try {
-                stream = canvas.captureStream(25); // Cap at 25 fps to prevent freezing
+                stream = canvas.captureStream(25);
             } catch (err) {
                 cleanup();
                 return reject(err);
@@ -74,7 +74,6 @@ const compressVideo = (file, targetHeight, onProgress) => {
             try {
                 mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
             } catch (e) {
-                // Fallback mimeType if webm isn't supported natively
                 mediaRecorder = new MediaRecorder(stream);
             }
 
@@ -101,7 +100,6 @@ const compressVideo = (file, targetHeight, onProgress) => {
 
             video.play().then(() => {
                 mediaRecorder.start(100);
-                
                 const drawFrame = () => {
                     if (video.paused || video.ended) return;
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -141,7 +139,7 @@ const SubscriberCount = ({ uploaderId }) => {
         const unsubscribe = onSnapshot(q, (s) => setCount(s.size), () => {});
         return () => unsubscribe();
     }, [uploaderId]);
-    return <span className="text-xs text-gray-500 dark:text-gray-400">{count} Subscribers</span>;
+    return <span className="text-xs text-gray-300">{count} Subs</span>;
 };
 
 // --- ICONS ---
@@ -503,13 +501,22 @@ const WatchView = ({ video, onBack, onSubscribe, onNavigateToChannel, currentUse
     );
 };
 
-const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChannel, currentUser }) => {
+// --- UPDATED BYTES PLAYER WITH LIKES, COMMENTS DRAWER, AND CREATOR CONTROLS ---
+const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChannel, currentUser, showMessage }) => {
     const [currentIndex, setCurrentIndex] = useState(startIndex);
+    const [likesCount, setLikesCount] = useState(0);
+    const [hasLiked, setHasLiked] = useState(false);
+    const [showComments, setShowComments] = useState(false);
+    const [comments, setComments] = useState([]);
+    const [newCommentText, setNewCommentText] = useState('');
+    
     const videoRef = useRef(null);
     const touchStartY = useRef(0);
     const currentByte = bytes[currentIndex];
-    const goToNext = () => setCurrentIndex(i => Math.min(i + 1, bytes.length - 1));
-    const goToPrev = () => setCurrentIndex(i => Math.max(i - 1, 0));
+
+    const goToNext = () => { setCurrentIndex(i => Math.min(i + 1, bytes.length - 1)); setShowComments(false); };
+    const goToPrev = () => { setCurrentIndex(i => Math.max(i - 1, 0)); setShowComments(false); };
+
     useEffect(() => {
         const handleKeyDown = (e) => {
             if (e.key === 'ArrowUp') { e.preventDefault(); goToPrev(); } 
@@ -518,33 +525,155 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [bytes.length]);
+
     useEffect(() => { if (videoRef.current) videoRef.current.play().catch(() => {}); }, [currentIndex]);
+
+    // Live Likes Listener
+    useEffect(() => {
+        if (!currentByte) return;
+        const likesQuery = query(collection(db, 'likes'), where("contentId", "==", currentByte.id));
+        const unsubscribe = onSnapshot(likesQuery, (snapshot) => {
+            setLikesCount(snapshot.size);
+            if (currentUser) {
+                setHasLiked(snapshot.docs.some(doc => doc.data().userId === currentUser.uid));
+            }
+        });
+        return () => unsubscribe();
+    }, [currentByte, currentUser]);
+
+    // Live Comments Listener
+    useEffect(() => {
+        if (!currentByte || !showComments) return;
+        const commentsQuery = query(collection(db, `bytes/${currentByte.id}/comments`));
+        const unsubscribe = onSnapshot(commentsQuery, (snapshot) => {
+            const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+            list.sort((a,b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+            setComments(list);
+        });
+        return () => unsubscribe();
+    }, [currentByte, showComments]);
+
+    const handleToggleLike = async () => {
+        if (!currentUser) { showMessage("Please log in to like videos.", "error"); return; }
+        const likesRef = collection(db, 'likes');
+        const q = query(likesRef, where("contentId", "==", currentByte.id), where("userId", "==", currentUser.uid));
+        const snap = await getDocs(q);
+
+        if (!snap.empty) {
+            snap.docs.forEach(d => deleteDoc(d.ref));
+        } else {
+            await addDoc(likesRef, { contentId: currentByte.id, userId: currentUser.uid, createdAt: serverTimestamp() });
+        }
+    };
+
+    const handleAddComment = async (e) => {
+        e.preventDefault();
+        if (!newCommentText.trim()) return;
+        if (!currentUser) { showMessage("Please log in to comment.", "error"); return; }
+
+        await addDoc(collection(db, `bytes/${currentByte.id}/comments`), {
+            text: newCommentText.trim(),
+            userName: currentUser.displayName || 'User',
+            userId: currentUser.uid,
+            createdAt: serverTimestamp()
+        });
+        setNewCommentText('');
+    };
+
     const handleTouchStart = (e) => touchStartY.current = e.targetTouches[0].clientY;
     const handleTouchEnd = (e) => {
         const touchEndY = e.changedTouches[0].clientY;
         const swipeDistance = touchStartY.current - touchEndY;
         if (Math.abs(swipeDistance) > 50) { if (swipeDistance > 0) goToNext(); else goToPrev(); }
     };
+
     if (!currentByte) return null;
+
     return (
-        <div className="relative w-full h-[calc(100vh-68px)] bg-black flex items-center justify-center pb-safe" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-            <button onClick={onBack} className="absolute top-4 left-4 z-30 px-4 py-2 bg-gray-800 bg-opacity-50 text-white rounded-full hover:bg-opacity-75">&larr; Back</button>
+        <div className="relative w-full h-[calc(100vh-65px)] bg-black flex items-center justify-center overflow-hidden" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+            {/* Top Back Button */}
+            <button onClick={onBack} className="absolute top-4 left-4 z-30 px-4 py-2 bg-gray-900/60 backdrop-blur-md text-white rounded-full hover:bg-gray-800 text-sm font-semibold">&larr; Back</button>
+            
             <div className="relative w-full sm:w-auto h-full max-w-sm flex items-center justify-center">
                 <video ref={videoRef} key={currentByte.id} src={currentByte.videoUrl} autoPlay loop muted playsInline className="w-full h-full object-contain"></video>
-                <div className="absolute bottom-0 left-0 p-4 text-white z-20 bg-gradient-to-t from-black/70 to-transparent w-full">
-                    <h3 className="font-bold text-lg">{currentByte.title}</h3>
-                    <p className="text-sm mt-1">{currentByte.description}</p>
-                    <div className="flex items-center justify-between mt-3">
-                        <div className="cursor-pointer hover:underline" onClick={() => onNavigateToChannel(currentByte.uploaderId)}>
-                            <span className="text-indigo-300 font-semibold">{currentByte.uploaderName}</span>
-                            <SubscriberCount uploaderId={currentByte.uploaderId} />
+                
+                {/* Right Action Side Bar (Like & Comment Buttons) */}
+                <div className="absolute right-3 bottom-24 z-30 flex flex-col items-center space-y-6">
+                    {/* Like Button */}
+                    <button onClick={handleToggleLike} className="flex flex-col items-center group">
+                        <div className={`p-3 rounded-full backdrop-blur-md transition-all active:scale-90 ${hasLiked ? 'bg-red-600 text-white' : 'bg-gray-900/60 text-white hover:bg-gray-800'}`}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill={hasLiked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
                         </div>
-                        {currentUser && currentUser.uid !== currentByte.uploaderId && <button onClick={() => onSubscribe(currentByte.uploaderId)} className="px-4 py-1.5 bg-red-600 text-white rounded-full shadow-md hover:bg-red-700 text-sm">Subscribe</button>}
+                        <span className="text-white text-xs font-bold mt-1 shadow-sm">{likesCount}</span>
+                    </button>
+
+                    {/* Comment Button */}
+                    <button onClick={() => setShowComments(!showComments)} className="flex flex-col items-center group">
+                        <div className="p-3 rounded-full bg-gray-900/60 backdrop-blur-md text-white hover:bg-gray-800 transition-all active:scale-90">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                        </div>
+                        <span className="text-white text-xs font-bold mt-1 shadow-sm">Chat</span>
+                    </button>
+                </div>
+
+                {/* Bottom Video Metadata & Channel Link */}
+                <div className="absolute bottom-16 left-0 right-12 p-4 text-white z-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent w-full">
+                    <div className="flex items-center space-x-3 mb-2">
+                        <div onClick={() => onNavigateToChannel(currentByte.uploaderId)} className="flex items-center space-x-2 cursor-pointer group">
+                            <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white border-2 border-indigo-400 group-hover:scale-105 transition-transform">
+                                {currentByte.uploaderName ? currentByte.uploaderName[0].toUpperCase() : 'U'}
+                            </div>
+                            <div>
+                                <span className="text-indigo-300 font-bold text-sm block group-hover:underline">{currentByte.uploaderName}</span>
+                                <SubscriberCount uploaderId={currentByte.uploaderId} />
+                            </div>
+                        </div>
+
+                        {currentUser && currentUser.uid !== currentByte.uploaderId && (
+                            <button onClick={() => onSubscribe(currentByte.uploaderId)} className="ml-auto px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-full font-semibold text-xs transition-colors shadow-md">
+                                Subscribe
+                            </button>
+                        )}
                     </div>
+                    
+                    <h3 className="font-bold text-base line-clamp-1">{currentByte.title}</h3>
+                    {currentByte.description && <p className="text-xs text-gray-300 line-clamp-2 mt-1">{currentByte.description}</p>}
                 </div>
             </div>
-            <button onClick={goToPrev} disabled={currentIndex === 0} className="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-30 p-3 bg-gray-800 bg-opacity-50 rounded-full disabled:opacity-20 hover:bg-opacity-75"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg></button>
-            <button onClick={goToNext} disabled={currentIndex === bytes.length - 1} className="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-30 p-3 bg-gray-800 bg-opacity-50 rounded-full disabled:opacity-20 hover:bg-opacity-75"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></button>
+
+            {/* Slide-Up Comments Drawer */}
+            {showComments && (
+                <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gray-900 border-t border-gray-700 rounded-t-2xl z-40 p-4 flex flex-col shadow-2xl animate-in slide-in-from-bottom">
+                    <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-800">
+                        <h4 className="text-white font-bold text-sm">Comments</h4>
+                        <button onClick={() => setShowComments(false)} className="text-gray-400 hover:text-white text-xs font-bold px-2 py-1 bg-gray-800 rounded-md">Close</button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1">
+                        {comments.length === 0 ? (
+                            <p className="text-gray-500 text-xs text-center py-6">No comments yet. Be the first to chat!</p>
+                        ) : (
+                            comments.map(c => (
+                                <div key={c.id} className="bg-gray-800/60 p-2.5 rounded-lg">
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-indigo-400 font-semibold text-xs">{c.userName}</span>
+                                    </div>
+                                    <p className="text-gray-200 text-xs mt-1">{c.text}</p>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    <form onSubmit={handleAddComment} className="flex space-x-2">
+                        <input type="text" value={newCommentText} onChange={(e) => setNewCommentText(e.target.value)} placeholder="Add a comment..." className="flex-1 bg-gray-800 text-white text-xs rounded-full px-4 py-2 border border-gray-700 focus:outline-none focus:border-indigo-500"/>
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-full">Post</button>
+                    </form>
+                </div>
+            )}
+
+            {/* Desktop Navigation Arrows */}
+            <button onClick={goToPrev} disabled={currentIndex === 0} className="hidden sm:block absolute left-4 top-1/2 -translate-y-1/2 z-30 p-3 bg-gray-900/60 text-white rounded-full disabled:opacity-20 hover:bg-gray-800"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg></button>
+            <button onClick={goToNext} disabled={currentIndex === bytes.length - 1} className="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 z-30 p-3 bg-gray-900/60 text-white rounded-full disabled:opacity-20 hover:bg-gray-800"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></button>
         </div>
     );
 };
@@ -1067,7 +1196,7 @@ function App() {
             case 'watch': 
                 return <WatchView video={watchingContent} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} />;
             case 'bytesPlayer': 
-                return <BytesPlayer bytes={bytesPlayerData.items} startIndex={bytesPlayerData.index} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} />;
+                return <BytesPlayer bytes={bytesPlayerData.items} startIndex={bytesPlayerData.index} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} showMessage={showMessageHandler} />;
             case 'channel': 
                 return <ChannelPage userId={viewingChannelId} currentUser={currentUser} allVideos={allVideos} allBytes={allBytes} onWatch={handleWatchContent} onNavigateToChannel={handleNavigateToChannel} onSubscribe={handleSubscribe} onEditProfile={handleOpenEditModal} />;
             case 'home': 
