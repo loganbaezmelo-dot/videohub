@@ -633,8 +633,9 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
                 </div>
             </div>
 
+            {/* FIXED: bottom-16 moves drawer clear above bottom navigation bar */}
             {showComments && (
-                <div className="absolute bottom-0 left-0 right-0 h-1/2 bg-gray-900 border-t border-gray-700 rounded-t-2xl z-40 p-4 flex flex-col shadow-2xl animate-in slide-in-from-bottom">
+                <div className="absolute bottom-16 left-0 right-0 h-1/2 bg-gray-900 border-t border-gray-700 rounded-t-2xl z-40 p-4 flex flex-col shadow-2xl animate-in slide-in-from-bottom">
                     <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-800">
                         <h4 className="text-white font-bold text-sm">Comments</h4>
                         <button onClick={() => setShowComments(false)} className="text-gray-400 hover:text-white text-xs font-bold px-2 py-1 bg-gray-800 rounded-md">Close</button>
@@ -1201,7 +1202,6 @@ function App() {
             <style>{`.animate-fade-in-out { animation: fadeInOut 4s ease-in-out; } @keyframes fadeInOut { 0%, 100% { opacity: 0; transform: translateY(-20px); } 15%, 85% { opacity: 1; transform: translateY(0); } }`}</style>
             <Message message={message} />
             
-            {/* Hides Navbar on Bytes Player view */}
             {view !== 'landing' && view !== 'authForm' && view !== 'bytesPlayer' && (
                 <Navbar currentUser={currentUser} currentUserProfile={currentUserProfile} onLogout={handleLogout} onSetView={handleSetView} onNavigateToChannel={handleNavigateToChannel} onNavigateToBytes={handleNavigateToBytes} searchTerm={searchTerm} onSearchChange={setSearchTerm} onOpenSettings={() => setIsSettingsModalOpen(true)} showMessage={showMessageHandler} />
             )}
