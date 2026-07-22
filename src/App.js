@@ -554,7 +554,7 @@ const SettingsModal = ({ theme, onThemeChange, onCancel, sessions, onRevokeSessi
                                                 <p className="text-xs text-gray-500 dark:text-gray-400">Last active: {session.lastActive?.toDate().toLocaleDateString() || 'Just now'}</p>
                                                 {session.id === localStorage.getItem('sessionId') && <span className="text-xs text-green-500 font-bold"> (This Device)</span>}
                                             </div>
-                                            <button onClick={() => handleRevokeSession(session.id)} className="text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium">
+                                            <button onClick={() => onRevokeSession(session.id)} className="text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium">
                                                 Remove
                                             </button>
                                         </div>
@@ -853,17 +853,34 @@ function App() {
     
     const renderContent = () => {
         if (!isAuthReady) return <div className="flex justify-center items-center h-screen text-xl text-gray-500">Connecting to VideoHub...</div>;
+        
+        let contentToDisplay = filteredVideos;
+        let pageTitle = "All Videos";
+        let emptyMsg = "No content found here.";
+
+        if (view === 'subscriptions') {
+            contentToDisplay = filteredVideos.filter(v => mySubscriptions.includes(v.uploaderId));
+            pageTitle = "Subscriptions";
+            emptyMsg = "No videos from your subscriptions yet!";
+        }
+
         switch (view) {
-            case 'landing': return <LandingPage handleGuestLogin={handleGuestLogin} setView={handleSetView} setAuthMode={setAuthMode} />;
-            case 'authForm': return <AuthForm mode={authMode} onLogin={handleLogin} onSignup={handleSignup} onProviderLogin={handleGoogleLogin} setView={handleSetView} />;
-            case 'upload': return <UploadForm onUpload={handleUpload} showMessage={showMessageHandler} defaultType={defaultUploadType} />;
-            case 'watch': return <WatchView video={watchingContent} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} />;
-            case 'bytesPlayer': return <BytesPlayer bytes={bytesPlayerData.items} startIndex={bytesPlayerData.index} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} />;
-            case 'channel': return <ChannelPage userId={viewingChannelId} currentUser={currentUser} allVideos={allVideos} allBytes={allBytes} onWatch={handleWatchContent} onNavigateToChannel={handleNavigateToChannel} onSubscribe={handleSubscribe} onEditProfile={handleOpenEditModal} />;
+            case 'landing': 
+                return <LandingPage handleGuestLogin={handleGuestLogin} setView={handleSetView} setAuthMode={setAuthMode} />;
+            case 'authForm': 
+                return <AuthForm mode={authMode} onLogin={handleLogin} onSignup={handleSignup} onProviderLogin={handleProviderLogin} setView={handleSetView} />;
+            case 'upload': 
+                return <UploadForm onUpload={handleUpload} showMessage={showMessageHandler} defaultType={defaultUploadType} />;
+            case 'watch': 
+                return <WatchView video={watchingContent} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} />;
+            case 'bytesPlayer': 
+                return <BytesPlayer bytes={bytesPlayerData.items} startIndex={bytesPlayerData.index} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} />;
+            case 'channel': 
+                return <ChannelPage userId={viewingChannelId} currentUser={currentUser} allVideos={allVideos} allBytes={allBytes} onWatch={handleWatchContent} onNavigateToChannel={handleNavigateToChannel} onSubscribe={handleSubscribe} onEditProfile={handleOpenEditModal} />;
             case 'home': 
             case 'subscriptions':
+            default: 
                 return <ContentGrid items={contentToDisplay} title={pageTitle} emptyMessage={emptyMsg} onWatch={handleWatchContent} onNavigateToChannel={handleNavigateToChannel} />;
-            default: return <ContentGrid items={contentToDisplay} title="All Videos" onWatch={handleWatchContent} onNavigateToChannel={handleNavigateToChannel} />;
         }
     };
 
@@ -875,11 +892,10 @@ function App() {
             {view !== 'landing' && view !== 'authForm' && <BottomNav currentUser={currentUser} currentUserProfile={currentUserProfile} currentView={view} onSetView={handleSetView} onNavigateToBytes={handleNavigateToBytes} onNavigateToChannel={handleNavigateToChannel} showMessage={showMessageHandler} />}
             {isEditModalOpen && <EditProfileModal userProfile={editingProfile} onSave={handleUpdateProfile} onCancel={handleCloseEditModal} />}
             {isNoBytesModalOpen && <NoBytesModal onGoToUpload={handleGoToUploadFromModal} onCancel={() => setIsNoBytesModalOpen(false)} />}
-            {isSettingsModalOpen && <SettingsModal theme={theme} onThemeChange={handleThemeChange} onCancel={() => setIsSettingsModalOpen(false)} currentUser={currentUser} onLinkAccount={handleLinkAccount} />}
+            {isSettingsModalOpen && <SettingsModal theme={theme} onThemeChange={handleThemeChange} onCancel={() => setIsSettingsModalOpen(false)} currentUser={currentUser} onLinkAccount={handleLinkAccount} sessions={sessions} onRevokeSession={handleRevokeSession} />}
             <main className={view === 'bytesPlayer' ? '' : 'container mx-auto max-w-7xl px-2'}>{renderContent()}</main>
         </div>
     );
 }
 
 export default App;
-
