@@ -10,7 +10,6 @@ import {
     getFirestore, doc, getDoc, addDoc, onSnapshot, collection, query, where, 
     getDocs, serverTimestamp, setDoc, updateDoc, deleteDoc
 } from 'firebase/firestore';
-import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -26,7 +25,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const storage = getStorage(app);
 
 // --- Helper: Detect Device Name ---
 const getDeviceName = () => {
@@ -38,6 +36,62 @@ const getDeviceName = () => {
     if (userAgent.match(/Mac/i)) return 'MacBook / Mac';
     if (userAgent.match(/Linux/i)) return 'Linux / Chromebook';
     return 'Unknown Device';
+};
+
+// --- Canvas Video Compression Helper ---
+const compressVideo = (file, targetHeight, onProgress) => {
+    return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.src = URL.createObjectURL(file);
+        
+        video.onloadedmetadata = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Calculate aspect ratio aspect
+            const aspectRatio = video.videoWidth / video.videoHeight;
+            canvas.height = targetHeight;
+            canvas.width = Math.round(targetHeight * aspectRatio);
+            
+            const stream = canvas.captureStream();
+            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            const chunks = [];
+            
+            mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const reader = new FileReader();
+                reader.readAsDataURL(blob);
+                reader.onloadend = () => {
+                    URL.revokeObjectURL(video.src);
+                    resolve({ dataUrl: reader.result, blobSize: blob.size });
+                };
+            };
+            
+            mediaRecorder.start();
+            video.currentTime = 0;
+            video.play();
+            
+            const processFrame = () => {
+                if (video.paused || video.ended) {
+                    mediaRecorder.stop();
+                    return;
+                }
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                if (onProgress) {
+                    onProgress(Math.round((video.currentTime / video.duration) * 100));
+                }
+                requestAnimationFrame(processFrame);
+            };
+            
+            video.onplay = () => processFrame();
+            video.onerror = (err) => {
+                URL.revokeObjectURL(video.src);
+                reject(err);
+            };
+        };
+    });
 };
 
 // --- Components ---
@@ -80,7 +134,6 @@ const BottomNav = ({ currentUser, currentUserProfile, currentView, onSetView, on
     const inactiveClass = "text-gray-500 dark:text-gray-400";
 
     const handleAuthAction = (action) => {
-        // FIXED: Only check currentUser exists (works for all auth states)
         if (currentUser) {
             action();
         } else {
@@ -263,45 +316,138 @@ const UploadForm = ({ onUpload, showMessage, defaultType }) => {
     const [uploadProgress, setUploadProgress] = useState(0);
     const [isUploading, setIsUploading] = useState(false);
     const [fileType, setFileType] = useState(defaultType || 'video');
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [detectedHeight, setDetectedHeight] = useState(null);
+    const [showCompressionOptions, setShowCompressionOptions] = useState(false);
+    const [fileSizeExceeded, setFileSizeExceeded] = useState(false);
+
     useEffect(() => { setFileType(defaultType || 'video'); }, [defaultType]);
 
-    const handleSubmit = async (event) => {
-        event.preventDefault();
-        if (isUploading) return;
-        const form = event.target;
-        const videoFile = form.querySelector('#video-file').files[0];
+    const handleFileSelect = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        setSelectedFile(file);
+        
+        // Detect video resolution
+        const tempVideo = document.createElement('video');
+        tempVideo.preload = 'metadata';
+        tempVideo.src = URL.createObjectURL(file);
+        tempVideo.onloadedmetadata = () => {
+            setDetectedHeight(tempVideo.videoHeight);
+            URL.revokeObjectURL(tempVideo.src);
+            
+            // Check Base64 overhead (~1.33x raw size) against 1MB limit (~750KB limit raw)
+            if (file.size > 750000) {
+                setFileSizeExceeded(true);
+            } else {
+                setFileSizeExceeded(false);
+            }
+        };
+    };
+
+    const handleUploadSubmit = async (targetResolution = null) => {
+        if (isUploading || !selectedFile) return;
+        
+        const form = document.querySelector('#upload-form');
         const title = form.querySelector('#video-title').value;
         const description = form.querySelector('#video-description').value || ""; 
-        let thumbnailFile = null;
-        if (fileType === 'video') {
-            const thumbInput = form.querySelector('#thumbnail-file');
-            if (thumbInput && thumbInput.files.length > 0) {
-                thumbnailFile = thumbInput.files[0];
-            }
+        const thumbInput = form.querySelector('#thumbnail-file');
+        const thumbnailFile = thumbInput && thumbInput.files.length > 0 ? thumbInput.files[0] : null;
+
+        if (!title) { 
+            showMessage({ text: 'Please enter a title.', type: 'error' }); 
+            return; 
         }
-        if (!videoFile || !title) { showMessage({ text: 'Please select a video file and enter a title.', type: 'error' }); return; }
+
         setIsUploading(true);
-        await onUpload({ videoFile, thumbnailFile, title, description, type: fileType, onProgress: setUploadProgress });
-        setIsUploading(false); setUploadProgress(0); form.reset();
+        await onUpload({ 
+            videoFile: selectedFile, 
+            thumbnailFile, 
+            title, 
+            description, 
+            type: fileType, 
+            targetResolution,
+            onProgress: setUploadProgress 
+        });
+        
+        setIsUploading(false); 
+        setUploadProgress(0); 
+        setShowCompressionOptions(false);
+        setFileSizeExceeded(false);
+        setSelectedFile(null);
+        form.reset();
     };
+
+    // Available target options
+    const resolutions = [
+        { label: '144p', height: 144 },
+        { label: '360p', height: 360 },
+        { label: '720p', height: 720 },
+        { label: '1080p', height: 1080 },
+        { label: '4K', height: 2160 }
+    ];
 
     return (
         <div className="max-w-2xl mx-auto p-6 sm:p-8 bg-white dark:bg-gray-800 rounded-lg mt-10 shadow-xl mb-20 sm:mb-0">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Upload New Content</h2>
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form id="upload-form" onSubmit={(e) => { e.preventDefault(); if (fileSizeExceeded && !showCompressionOptions) setShowCompressionOptions(true); else handleUploadSubmit(); }} className="space-y-6">
                 <select value={fileType} onChange={(e) => setFileType(e.target.value)} className="w-full px-3 py-2 text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"><option value="video">Video (Long Form)</option><option value="byte">Byte (Short Form)</option></select>
                 <input type="text" id="video-title" placeholder="Title" required className="w-full px-3 py-2 text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                 <textarea id="video-description" rows="3" placeholder="Description (Optional)" className="w-full px-3 py-2 text-gray-900 dark:text-white bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
-                <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Video/Byte File</label><input type="file" id="video-file" accept="video/*" required className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 mt-1" /></div>
+                
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Video/Byte File</label>
+                    <input type="file" id="video-file" accept="video/*" onChange={handleFileSelect} required className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 mt-1" />
+                </div>
+
                 {fileType === 'video' && (
                     <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Thumbnail Image (Optional)</label><input type="file" id="thumbnail-file" accept="image/*" className="w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100 mt-1" /></div>
                 )}
-                {isUploading && (
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 mt-4 overflow-hidden relative">
-                        <div className="bg-indigo-600 h-4 rounded-full transition-all duration-300 ease-out flex items-center justify-center text-[10px] text-white font-bold" style={{ width: `${uploadProgress}%` }}>{uploadProgress > 0 && `${uploadProgress.toFixed(0)}%`}</div>
+
+                {/* FILE EXCEEDS 1MB NOTIFICATION */}
+                {fileSizeExceeded && (
+                    <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-500 text-sm">
+                        ⚠️ <strong>File size exceeds 1 MB limit!</strong> Direct Base64 upload will fail. Select a lower resolution to compress it:
                     </div>
                 )}
-                <button type="submit" disabled={isUploading} className="w-full py-2 px-4 text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:bg-gray-500 disabled:cursor-not-allowed">{isUploading ? `Uploading...` : 'Upload'}</button>
+
+                {/* COMPRESSION RESOLUTION SELECTOR */}
+                {(showCompressionOptions || fileSizeExceeded) && (
+                    <div className="space-y-2 p-4 bg-gray-100 dark:bg-gray-700/50 rounded-lg">
+                        <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Compress Video Resolution:</p>
+                        <div className="grid grid-cols-5 gap-2">
+                            {resolutions.map((res) => {
+                                const isDisabled = detectedHeight && detectedHeight <= res.height;
+                                return (
+                                    <button
+                                        key={res.label}
+                                        type="button"
+                                        disabled={isDisabled || isUploading}
+                                        onClick={() => handleUploadSubmit(res.height)}
+                                        className={`py-2 text-xs font-bold rounded-md transition-colors ${
+                                            isDisabled 
+                                                ? 'bg-gray-300 dark:bg-gray-800 text-gray-500 cursor-not-allowed opacity-50' 
+                                                : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md'
+                                        }`}
+                                    >
+                                        {res.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {isUploading && (
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 mt-4 overflow-hidden relative">
+                        <div className="bg-indigo-600 h-4 rounded-full transition-all duration-300 ease-out flex items-center justify-center text-[10px] text-white font-bold" style={{ width: `${uploadProgress}%` }}>{uploadProgress > 0 && `${uploadProgress}%`}</div>
+                    </div>
+                )}
+
+                {!fileSizeExceeded && (
+                    <button type="submit" disabled={isUploading} className="w-full py-2 px-4 text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:bg-gray-500 disabled:cursor-not-allowed">{isUploading ? `Processing...` : 'Upload'}</button>
+                )}
             </form>
         </div>
     );
@@ -585,7 +731,7 @@ function App() {
     const [isAuthReady, setIsAuthReady] = useState(false);
     const [sessions, setSessions] = useState([]);
 
-    const [view, setView] = useState('home'); // Default directly to home feed
+    const [view, setView] = useState('home');
     const [authMode, setAuthMode] = useState('login');
     const [watchingContent, setWatchingContent] = useState(null);
     const [bytesPlayerData, setBytesPlayerData] = useState({ items: [], index: 0 });
@@ -633,7 +779,6 @@ function App() {
                 if (user) {
                     setCurrentUser(user);
                     
-                    // Instant optimistic profile state so UI never freezes
                     const fallbackProfile = {
                         name: user.displayName || `User-${user.uid.substring(0, 6)}`,
                         description: "Welcome to my channel!",
@@ -642,7 +787,6 @@ function App() {
                     setCurrentUserProfile(fallbackProfile);
 
                     if (!user.isAnonymous) {
-                        // Profile Listener
                         const userRef = doc(db, 'users', user.uid);
                         userProfileUnsubscribe = onSnapshot(userRef, async (docSnap) => {
                             if (docSnap.exists()) {
@@ -658,13 +802,11 @@ function App() {
                             }
                         }, () => {});
 
-                        // Sessions Listener
                         const sessionsRef = collection(db, `users/${user.uid}/sessions`);
                         sessionsUnsubscribe = onSnapshot(sessionsRef, (snapshot) => {
                              setSessions(snapshot.docs.map(d => ({id: d.id, ...d.data()})));
                         }, () => {});
 
-                        // Subscriptions Listener
                         const subsQuery = query(collection(db, 'subscribers'), where("subscriberId", "==", user.uid));
                         subscriptionsUnsubscribe = onSnapshot(subsQuery, (snapshot) => {
                             setMySubscriptions(snapshot.docs.map(d => d.data().uploaderId));
@@ -687,7 +829,6 @@ function App() {
             }
         });
 
-        // Data Listeners
         const unsubVideos = onSnapshot(query(collection(db, 'videos')), (s) => {
             setAllVideos(s.docs.map(d=>({id: d.id, ...d.data()})).sort((a,b)=>(b.createdAt?.toMillis()||0)-(a.createdAt?.toMillis()||0)));
         }, () => {});
@@ -777,18 +918,69 @@ function App() {
     const handleGoToUploadFromModal = () => { setIsNoBytesModalOpen(false); setDefaultUploadType('byte'); setView('upload'); };
     const handleSetView = (view) => { if (view !== 'upload') { setDefaultUploadType('video'); } setView(view); setSearchTerm(''); };
 
-    const handleUpload = async ({ videoFile, thumbnailFile, title, description, type, onProgress }) => {
+    // --- BASE64 & IN-BROWSER CANVAS COMPRESSION UPLOADER ---
+    const handleUpload = async ({ videoFile, thumbnailFile, title, description, type, targetResolution, onProgress }) => {
         if (!currentUser) { showMessageHandler('You must be logged in to upload.', 'error'); return; }
-        const uploadFile = (file, path, cb) => new Promise((res, rej) => { const task = uploadBytesResumable(ref(storage, path), file); task.on('state_changed', (s) => cb && cb((s.bytesTransferred / s.totalBytes) * 100), rej, async () => res(await getDownloadURL(task.snapshot.ref))); });
+
+        const fileToBase64 = file => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+
         try { 
-            const timestamp = Date.now(); 
-            const videoUrl = await uploadFile(videoFile, `content/${currentUser.uid}/${timestamp}_${videoFile.name}`, onProgress); 
+            let finalVideoUrl = '';
+
+            // 1. Process Video Payload
+            if (targetResolution) {
+                if (onProgress) onProgress(10);
+                showMessageHandler(`Compressing video to ${targetResolution}p...`, 'info');
+                
+                const compressionResult = await compressVideo(videoFile, targetResolution, (progress) => {
+                    if (onProgress) onProgress(Math.min(90, progress));
+                });
+                
+                finalVideoUrl = compressionResult.dataUrl;
+                
+                if (compressionResult.blobSize > 750000) {
+                    showMessageHandler(`Warning: Even compressed, this video might exceed Firestore's 1MB limit. Try a lower resolution like 144p or 360p.`, 'error');
+                }
+            } else {
+                if (onProgress) onProgress(50);
+                finalVideoUrl = await fileToBase64(videoFile);
+            }
+
+            // 2. Process Thumbnail
             let thumbnailUrl = null;
-            if (thumbnailFile) { thumbnailUrl = await uploadFile(thumbnailFile, `content/${currentUser.uid}/${timestamp}_${thumbnailFile.name}`, null); } 
-            else { thumbnailUrl = type === 'byte' ? `https://placehold.co/400x600/7c3aed/ffffff?text=${encodeURIComponent(title)}` : `https://placehold.co/600x400/4338ca/ffffff?text=${encodeURIComponent(title)}`; }
-            await addDoc(collection(db, `${type}s`), { title, description, videoUrl, thumbnailUrl, uploaderId: currentUser.uid, uploaderName: currentUserProfile?.name || currentUser.displayName || 'User', createdAt: serverTimestamp() }); 
-            showMessageHandler(`${type.charAt(0).toUpperCase() + type.slice(1)} uploaded!`, 'success'); handleSetView('home'); 
-        } catch (e) { console.error(e); showMessageHandler('Upload failed. Check Storage rules.', 'error'); }
+            if (thumbnailFile) { 
+                thumbnailUrl = await fileToBase64(thumbnailFile); 
+            } else { 
+                thumbnailUrl = type === 'byte' 
+                    ? `https://placehold.co/400x600/7c3aed/ffffff?text=${encodeURIComponent(title)}` 
+                    : `https://placehold.co/600x400/4338ca/ffffff?text=${encodeURIComponent(title)}`; 
+            }
+            
+            if (onProgress) onProgress(95);
+
+            // 3. Write Document to Firestore
+            await addDoc(collection(db, `${type}s`), { 
+                title, 
+                description, 
+                videoUrl: finalVideoUrl, 
+                thumbnailUrl, 
+                uploaderId: currentUser.uid, 
+                uploaderName: currentUserProfile?.name || currentUser.displayName || 'User', 
+                createdAt: serverTimestamp() 
+            }); 
+
+            if (onProgress) onProgress(100);
+            showMessageHandler(`${type.charAt(0).toUpperCase() + type.slice(1)} uploaded!`, 'success'); 
+            handleSetView('home'); 
+        } catch (e) { 
+            console.error(e); 
+            showMessageHandler('Upload failed. Compressed payload exceeds 1MB Firestore limit.', 'error'); 
+        }
     };
 
     const handleSubscribe = async (uploaderId) => {
@@ -807,13 +999,20 @@ function App() {
         if (!currentUser) return;
         const userRef = doc(db, 'users', currentUser.uid);
         const updateData = { name, description };
+        
+        const fileToBase64 = file => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+
         if (profileImageFile) { 
-            const uploadFile = (file, path) => new Promise((res, rej) => { const task = uploadBytesResumable(ref(storage, path), file); task.on('state_changed', null, rej, async () => res(await getDownloadURL(task.snapshot.ref))); }); 
             try { 
-                const newProfilePictureUrl = await uploadFile(profileImageFile, `profile-pictures/${currentUser.uid}/${Date.now()}_${profileImageFile.name}`); 
+                const newProfilePictureUrl = await fileToBase64(profileImageFile); 
                 updateData.profilePictureUrl = newProfilePictureUrl; 
             } catch (error) { 
-                showMessageHandler('Failed to upload profile picture.', 'error'); 
+                showMessageHandler('Failed to process profile picture.', 'error'); 
                 return; 
             } 
         }
