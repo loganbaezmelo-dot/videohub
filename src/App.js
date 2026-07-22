@@ -587,13 +587,13 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
     if (!currentByte) return null;
 
     return (
-        <div className="relative w-full h-screen bg-black flex items-center justify-center overflow-hidden pb-16" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-            <button onClick={onBack} className="absolute top-4 left-4 z-30 px-4 py-2 bg-gray-900/60 backdrop-blur-md text-white rounded-full hover:bg-gray-800 text-sm font-semibold">&larr; Back</button>
+        <div className="fixed inset-0 bg-black flex items-center justify-center overflow-hidden pb-16 z-30" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+            <button onClick={onBack} className="absolute top-4 left-4 z-40 px-4 py-2 bg-gray-900/60 backdrop-blur-md text-white rounded-full hover:bg-gray-800 text-sm font-semibold">&larr; Back</button>
             
             <div className="relative w-full sm:w-auto h-full max-w-sm flex items-center justify-center">
                 <video ref={videoRef} key={currentByte.id} src={currentByte.videoUrl} autoPlay loop muted playsInline className="w-full h-full object-contain"></video>
                 
-                <div className="absolute right-3 bottom-24 z-30 flex flex-col items-center space-y-6">
+                <div className="absolute right-3 bottom-24 z-40 flex flex-col items-center space-y-6">
                     <button onClick={handleToggleLike} className="flex flex-col items-center group">
                         <div className={`p-3 rounded-full backdrop-blur-md transition-all active:scale-90 ${hasLiked ? 'bg-red-600 text-white' : 'bg-gray-900/60 text-white hover:bg-gray-800'}`}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill={hasLiked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" /></svg>
@@ -609,7 +609,7 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
                     </button>
                 </div>
 
-                <div className="absolute bottom-20 left-0 right-14 p-4 text-white z-20 bg-gradient-to-t from-black/80 via-black/40 to-transparent w-full">
+                <div className="absolute bottom-20 left-0 right-14 p-4 text-white z-30 bg-gradient-to-t from-black/80 via-black/40 to-transparent w-full">
                     <div className="flex items-center space-x-3 mb-2">
                         <div onClick={() => onNavigateToChannel(currentByte.uploaderId)} className="flex items-center space-x-2 cursor-pointer group">
                             <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white border-2 border-indigo-400 group-hover:scale-105 transition-transform">
@@ -633,9 +633,8 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
                 </div>
             </div>
 
-            {/* FIXED: bottom-16 moves drawer clear above bottom navigation bar */}
             {showComments && (
-                <div className="absolute bottom-16 left-0 right-0 h-1/2 bg-gray-900 border-t border-gray-700 rounded-t-2xl z-40 p-4 flex flex-col shadow-2xl animate-in slide-in-from-bottom">
+                <div className="fixed bottom-16 left-0 right-0 h-1/2 bg-gray-900 border-t border-gray-700 rounded-t-2xl z-40 p-4 flex flex-col shadow-2xl animate-in slide-in-from-bottom max-w-lg mx-auto">
                     <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-800">
                         <h4 className="text-white font-bold text-sm">Comments</h4>
                         <button onClick={() => setShowComments(false)} className="text-gray-400 hover:text-white text-xs font-bold px-2 py-1 bg-gray-800 rounded-md">Close</button>
@@ -663,8 +662,8 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
                 </div>
             )}
 
-            <button onClick={goToPrev} disabled={currentIndex === 0} className="hidden sm:block absolute left-4 top-1/2 -translate-y-1/2 z-30 p-3 bg-gray-900/60 text-white rounded-full disabled:opacity-20 hover:bg-gray-800"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg></button>
-            <button onClick={goToNext} disabled={currentIndex === bytes.length - 1} className="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 z-30 p-3 bg-gray-900/60 text-white rounded-full disabled:opacity-20 hover:bg-gray-800"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></button>
+            <button onClick={goToPrev} disabled={currentIndex === 0} className="hidden sm:block absolute left-4 top-1/2 -translate-y-1/2 z-40 p-3 bg-gray-900/60 text-white rounded-full disabled:opacity-20 hover:bg-gray-800"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg></button>
+            <button onClick={goToNext} disabled={currentIndex === bytes.length - 1} className="hidden sm:block absolute right-4 top-1/2 -translate-y-1/2 z-40 p-3 bg-gray-900/60 text-white rounded-full disabled:opacity-20 hover:bg-gray-800"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg></button>
         </div>
     );
 };
