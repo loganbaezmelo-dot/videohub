@@ -54,7 +54,7 @@ const SubscriberCount = ({ uploaderId }) => {
     useEffect(() => {
         if (!uploaderId) return;
         const q = query(collection(db, 'subscribers'), where("uploaderId", "==", uploaderId));
-        const unsubscribe = onSnapshot(q, (s) => setCount(s.size), console.error);
+        const unsubscribe = onSnapshot(q, (s) => setCount(s.size), () => {});
         return () => unsubscribe();
     }, [uploaderId]);
     return <span className="text-xs text-gray-500 dark:text-gray-400">{count} Subscribers</span>;
@@ -80,7 +80,8 @@ const BottomNav = ({ currentUser, currentUserProfile, currentView, onSetView, on
     const inactiveClass = "text-gray-500 dark:text-gray-400";
 
     const handleAuthAction = (action) => {
-        if (currentUser && !currentUser.isAnonymous) {
+        // FIXED: Only check currentUser exists (works for all auth states)
+        if (currentUser) {
             action();
         } else {
             showMessage("Please log in to use this feature.", "error");
@@ -108,8 +109,8 @@ const BottomNav = ({ currentUser, currentUserProfile, currentView, onSetView, on
                 <span className="text-[10px] font-medium">Subs</span>
             </button>
             <button onClick={() => handleAuthAction(() => onNavigateToChannel(currentUser.uid))} className={`flex-1 flex flex-col items-center py-2 space-y-1 ${isActive('channel') ? activeClass : inactiveClass}`}>
-                {currentUser && !currentUser.isAnonymous && currentUserProfile ? (
-                     <img src={currentUserProfile.profilePictureUrl} alt="Me" className={`h-6 w-6 rounded-full object-cover ${isActive('channel') ? 'ring-2 ring-indigo-600' : ''}`} onError={(e) => e.target.src=`https://placehold.co/24x24/7c3aed/ffffff?text=${currentUserProfile.name ? currentUserProfile.name[0] : '?'}`}/>
+                {currentUser ? (
+                     <img src={currentUserProfile?.profilePictureUrl || currentUser.photoURL || `https://placehold.co/24x24/7c3aed/ffffff?text=${currentUser.displayName ? currentUser.displayName[0] : 'U'}`} alt="Me" className={`h-6 w-6 rounded-full object-cover ${isActive('channel') ? 'ring-2 ring-indigo-600' : ''}`} onError={(e) => e.target.src=`https://placehold.co/24x24/7c3aed/ffffff?text=U`}/>
                 ) : (
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                 )}
@@ -130,7 +131,7 @@ const Navbar = ({ currentUser, currentUserProfile, onLogout, onSetView, onNaviga
     }, []);
 
     const handleUploadClick = () => {
-        if (currentUser && !currentUser.isAnonymous) {
+        if (currentUser) {
             onSetView('upload');
         } else {
             showMessage("Please log in to upload content.", "error");
@@ -153,7 +154,7 @@ const Navbar = ({ currentUser, currentUserProfile, onLogout, onSetView, onNaviga
                         <>
                             <button onClick={handleUploadClick} className="hidden md:block px-3 py-2 sm:px-4 sm:py-2 bg-green-600 text-white rounded-full shadow-md hover:bg-green-700 transition-colors text-sm sm:text-base">Upload</button>
                             <div ref={profileMenuRef}>
-                                <img src={currentUserProfile?.profilePictureUrl || `https://placehold.co/40x40/7c3aed/ffffff?text=${currentUserProfile?.name ? currentUserProfile.name[0].toUpperCase() : '?'}`} alt="My Profile" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover cursor-pointer border-2 border-transparent hover:border-indigo-500 transition-colors" onError={(e) => e.target.src=`https://placehold.co/40x40/7c3aed/ffffff?text=${currentUserProfile?.name ? currentUserProfile.name[0].toUpperCase() : '?'}`}/>
+                                <img src={currentUserProfile?.profilePictureUrl || currentUser.photoURL || `https://placehold.co/40x40/7c3aed/ffffff?text=${currentUser.displayName ? currentUser.displayName[0].toUpperCase() : 'U'}`} alt="My Profile" onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)} className="w-8 h-8 sm:w-10 sm:h-10 rounded-full object-cover cursor-pointer border-2 border-transparent hover:border-indigo-500 transition-colors" onError={(e) => e.target.src=`https://placehold.co/40x40/7c3aed/ffffff?text=U`}/>
                                 {isProfileMenuOpen && (
                                     <div className="absolute right-0 top-12 mt-2 w-48 bg-white dark:bg-gray-800 rounded-md shadow-lg py-1 border border-gray-200 dark:border-gray-700 z-50">
                                         <button onClick={() => { onNavigateToChannel(currentUser.uid); setIsProfileMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700">My Channel</button>
@@ -342,7 +343,7 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [bytes.length]);
-    useEffect(() => { if (videoRef.current) videoRef.current.play().catch(console.error); }, [currentIndex]);
+    useEffect(() => { if (videoRef.current) videoRef.current.play().catch(() => {}); }, [currentIndex]);
     const handleTouchStart = (e) => touchStartY.current = e.targetTouches[0].clientY;
     const handleTouchEnd = (e) => {
         const touchEndY = e.changedTouches[0].clientY;
@@ -374,8 +375,8 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
 };
 
 const EditProfileModal = ({ userProfile, onSave, onCancel }) => {
-    const [name, setName] = useState(userProfile.name);
-    const [description, setDescription] = useState(userProfile.description || '');
+    const [name, setName] = useState(userProfile?.name || '');
+    const [description, setDescription] = useState(userProfile?.description || '');
     const [profileImageFile, setProfileImageFile] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
     const handleSave = async () => { setIsSaving(true); await onSave({ name, description, profileImageFile }); setIsSaving(false); onCancel(); };
@@ -404,16 +405,20 @@ const ChannelPage = ({ userId, currentUser, allVideos, allBytes, onWatch, onNavi
         if (!userId) return;
         setIsLoading(true);
         const userRef = doc(db, 'users', userId);
-        const unsubscribe = onSnapshot(userRef, (doc) => {
-            if (doc.exists()) setProfile({ id: doc.id, ...doc.data() });
-            else console.error("User profile not found!");
+        const unsubscribe = onSnapshot(userRef, (docSnap) => {
+            if (docSnap.exists()) {
+                setProfile({ id: docSnap.id, ...docSnap.data() });
+            } else {
+                setProfile({ id: userId, name: "User Channel", description: "Welcome to my channel!", profilePictureUrl: `https://placehold.co/128x128/7c3aed/ffffff?text=U` });
+            }
+            setIsLoading(false);
+        }, () => {
             setIsLoading(false);
         });
         return () => unsubscribe();
     }, [userId]);
 
     if (isLoading) return <div className="text-center py-20 text-gray-800 dark:text-white">Loading Channel...</div>;
-    if (!profile) return <div className="text-center py-20 text-gray-800 dark:text-white">Channel not found.</div>;
 
     const userVideos = allVideos.filter(v => v.uploaderId === userId);
     const userBytes = allBytes.filter(b => b.uploaderId === userId);
@@ -423,14 +428,14 @@ const ChannelPage = ({ userId, currentUser, allVideos, allBytes, onWatch, onNavi
             <div className="p-4 sm:p-8 bg-gray-100 dark:bg-gray-800">
                 <div className="flex flex-col sm:flex-row items-center space-y-4 sm:space-y-0 sm:space-x-6 max-w-4xl mx-auto">
                     <img 
-                        src={profile.profilePictureUrl} 
-                        alt={profile.name} 
+                        src={profile?.profilePictureUrl || `https://placehold.co/128x128/7c3aed/ffffff?text=U`} 
+                        alt={profile?.name || 'Channel'} 
                         className="w-24 h-24 sm:w-32 sm:h-32 rounded-full object-cover border-4 border-indigo-500" 
-                        onError={(e) => e.target.src=`https://placehold.co/128x128/7c3aed/ffffff?text=${profile.name ? profile.name[0].toUpperCase() : '?'}`}
+                        onError={(e) => e.target.src=`https://placehold.co/128x128/7c3aed/ffffff?text=U`}
                     />
                     <div className="text-center sm:text-left">
-                        <h1 className="text-4xl font-bold text-gray-900 dark:text-white">{profile.name}</h1>
-                        <p className="text-gray-600 dark:text-gray-300 mt-2 max-w-xl">{profile.description}</p>
+                        <h1 className="text-4xl font-bold text-gray-900 dark:text-white">{profile?.name || "User Channel"}</h1>
+                        <p className="text-gray-600 dark:text-gray-300 mt-2 max-w-xl">{profile?.description}</p>
                         <div className="mt-4 flex items-center justify-center sm:justify-start space-x-6">
                             <SubscriberCount uploaderId={userId} />
                             {currentUser?.uid === userId ? (
@@ -463,7 +468,7 @@ const NoBytesModal = ({ onGoToUpload, onCancel }) => (
 
 const SettingsModal = ({ theme, onThemeChange, onCancel, sessions, onRevokeSession, currentUser, onLinkAccount }) => {
     const [activeTab, setActiveTab] = useState('general');
-    const linkedProviders = currentUser?.providerData.map(p => p.providerId) || [];
+    const linkedProviders = currentUser?.providerData?.map(p => p.providerId) || [];
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
@@ -543,7 +548,6 @@ const SettingsModal = ({ theme, onThemeChange, onCancel, sessions, onRevokeSessi
                             <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">Devices currently logged into your account.</p>
                             
                             <div className="space-y-3">
-                                {/* Sessions list */}
                                 {sessions.length === 0 ? (
                                     <p className="text-sm text-gray-500">No active sessions found.</p>
                                 ) : (
@@ -551,7 +555,7 @@ const SettingsModal = ({ theme, onThemeChange, onCancel, sessions, onRevokeSessi
                                         <div key={session.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
                                             <div>
                                                 <p className="text-sm font-medium text-gray-900 dark:text-white">{session.deviceName}</p>
-                                                <p className="text-xs text-gray-500 dark:text-gray-400">Last active: {session.lastActive?.toDate().toLocaleDateString() || 'Just now'}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400">Last active: {session.lastActive?.toDate ? session.lastActive.toDate().toLocaleDateString() : 'Just now'}</p>
                                                 {session.id === localStorage.getItem('sessionId') && <span className="text-xs text-green-500 font-bold"> (This Device)</span>}
                                             </div>
                                             <button onClick={() => onRevokeSession(session.id)} className="text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 font-medium">
@@ -581,7 +585,7 @@ function App() {
     const [isAuthReady, setIsAuthReady] = useState(false);
     const [sessions, setSessions] = useState([]);
 
-    const [view, setView] = useState('landing');
+    const [view, setView] = useState('home'); // Default directly to home feed
     const [authMode, setAuthMode] = useState('login');
     const [watchingContent, setWatchingContent] = useState(null);
     const [bytesPlayerData, setBytesPlayerData] = useState({ items: [], index: 0 });
@@ -616,53 +620,130 @@ function App() {
     }, [theme]);
 
     const handleThemeChange = (newTheme) => { setTheme(newTheme); localStorage.setItem('theme', newTheme); };
-    
-    // --- Session Management Logic ---
-    const registerSession = async (user) => {
-        let sessionId = localStorage.getItem('sessionId');
-        if (!sessionId) {
-            sessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-            localStorage.setItem('sessionId', sessionId);
-        }
-        
-        const sessionRef = doc(db, `users/${user.uid}/sessions`, sessionId);
-        await setDoc(sessionRef, {
-            id: sessionId,
-            deviceName: getDeviceName(),
-            lastActive: serverTimestamp(),
-            userAgent: navigator.userAgent
+
+    const showMessageHandler = (text, type = 'info') => { setMessage({ text, type }); setTimeout(() => setMessage(null), 4000); };
+
+    useEffect(() => {
+        let userProfileUnsubscribe = null;
+        let sessionsUnsubscribe = null;
+        let subscriptionsUnsubscribe = null;
+
+        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+            try {
+                if (user) {
+                    setCurrentUser(user);
+                    
+                    // Instant optimistic profile state so UI never freezes
+                    const fallbackProfile = {
+                        name: user.displayName || `User-${user.uid.substring(0, 6)}`,
+                        description: "Welcome to my channel!",
+                        profilePictureUrl: user.photoURL || `https://placehold.co/128x128/7c3aed/ffffff?text=${user.displayName ? user.displayName[0].toUpperCase() : 'U'}`
+                    };
+                    setCurrentUserProfile(fallbackProfile);
+
+                    if (!user.isAnonymous) {
+                        // Profile Listener
+                        const userRef = doc(db, 'users', user.uid);
+                        userProfileUnsubscribe = onSnapshot(userRef, async (docSnap) => {
+                            if (docSnap.exists()) {
+                                setCurrentUserProfile(docSnap.data());
+                            } else {
+                                await setDoc(userRef, {
+                                    email: user.email || '',
+                                    name: fallbackProfile.name,
+                                    createdAt: serverTimestamp(),
+                                    description: fallbackProfile.description,
+                                    profilePictureUrl: fallbackProfile.profilePictureUrl
+                                }).catch(() => {});
+                            }
+                        }, () => {});
+
+                        // Sessions Listener
+                        const sessionsRef = collection(db, `users/${user.uid}/sessions`);
+                        sessionsUnsubscribe = onSnapshot(sessionsRef, (snapshot) => {
+                             setSessions(snapshot.docs.map(d => ({id: d.id, ...d.data()})));
+                        }, () => {});
+
+                        // Subscriptions Listener
+                        const subsQuery = query(collection(db, 'subscribers'), where("subscriberId", "==", user.uid));
+                        subscriptionsUnsubscribe = onSnapshot(subsQuery, (snapshot) => {
+                            setMySubscriptions(snapshot.docs.map(d => d.data().uploaderId));
+                        }, () => {});
+                    }
+
+                } else {
+                    setCurrentUser(null);
+                    setCurrentUserProfile(null);
+                    setSessions([]);
+                    setMySubscriptions([]);
+                    if (userProfileUnsubscribe) userProfileUnsubscribe();
+                    if (sessionsUnsubscribe) sessionsUnsubscribe();
+                    if (subscriptionsUnsubscribe) subscriptionsUnsubscribe();
+                }
+            } catch (error) {
+                console.error("Auth Listener Exception:", error);
+            } finally {
+                 setIsAuthReady(true);
+            }
         });
+
+        // Data Listeners
+        const unsubVideos = onSnapshot(query(collection(db, 'videos')), (s) => {
+            setAllVideos(s.docs.map(d=>({id: d.id, ...d.data()})).sort((a,b)=>(b.createdAt?.toMillis()||0)-(a.createdAt?.toMillis()||0)));
+        }, () => {});
+
+        const unsubBytes = onSnapshot(query(collection(db, 'bytes')), (s) => {
+            setAllBytes(s.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(b.createdAt?.toMillis()||0)-(a.createdAt?.toMillis()||0)));
+        }, () => {});
+
+        return () => { 
+            unsubscribeAuth(); 
+            unsubVideos(); 
+            unsubBytes(); 
+            if (userProfileUnsubscribe) userProfileUnsubscribe(); 
+            if (sessionsUnsubscribe) sessionsUnsubscribe();
+            if (subscriptionsUnsubscribe) subscriptionsUnsubscribe();
+        };
+    }, []); 
+
+    const handleGuestLogin = async () => { try { await signInAnonymously(auth); setView('home'); } catch (e) { showMessageHandler("Could not sign in as guest.", 'error'); }};
+    const handleSignup = async (email, password) => { try { await createUserWithEmailAndPassword(auth, email, password); showMessageHandler('Account created!', 'success'); setView('home'); } catch (e) { showMessageHandler(e.message, 'error'); }};
+    const handleLogin = async (email, password) => { try { await signInWithEmailAndPassword(auth, email, password); showMessageHandler('Logged in!', 'success'); setView('home'); } catch (e) { showMessageHandler(e.message, 'error'); }};
+    
+    const handleProviderLogin = async (providerMethod) => { 
+        let provider;
+        switch(providerMethod) {
+            case 'google': provider = new GoogleAuthProvider(); break;
+            case 'github': provider = new GithubAuthProvider(); break;
+            case 'yahoo': provider = new OAuthProvider('yahoo.com'); break;
+            default: return;
+        }
+        try { 
+            await setPersistence(auth, browserLocalPersistence); 
+            await signInWithPopup(auth, provider); 
+            setView('home'); 
+            showMessageHandler(`Logged in successfully!`, 'success'); 
+        } catch (error) { 
+            console.error(error); 
+            showMessageHandler(error.message, 'error'); 
+        }
     };
 
-    const checkSessionValidity = async (user) => {
-        const sessionId = localStorage.getItem('sessionId');
-        if (!sessionId) return true; 
-
-        const sessionRef = doc(db, `users/${user.uid}/sessions`, sessionId);
-        const docSnap = await getDoc(sessionRef);
-        
-        if (!docSnap.exists()) {
-            await signOut(auth);
-            localStorage.removeItem('sessionId');
-            setView('landing');
-            showMessageHandler("You were logged out from another device.", "error");
-            return false;
-        }
-        return true;
+    const handleLogout = async () => { 
+        try { 
+            await signOut(auth); 
+            setView('landing'); 
+            showMessageHandler('Logged out.', 'success'); 
+        } 
+        catch (e) { showMessageHandler('Failed to log out.', 'error'); }
     };
 
     const handleRevokeSession = async (sessionId) => {
         if (!currentUser) return;
         try {
             await deleteDoc(doc(db, `users/${currentUser.uid}/sessions`, sessionId));
-            if (sessionId === localStorage.getItem('sessionId')) {
-                await signOut(auth);
-                localStorage.removeItem('sessionId');
-                setView('landing');
-            }
             showMessageHandler("Device removed successfully.", "success");
         } catch (e) {
-            console.error(e);
             showMessageHandler("Failed to remove device.", "error");
         }
     };
@@ -685,118 +766,9 @@ function App() {
                 showMessageHandler("Account exists. Switching to it...", "info");
                 await signInWithPopup(auth, provider);
             } else {
-                console.error("Link error:", error);
                 showMessageHandler(error.message, "error");
             }
         }
-    };
-
-    useEffect(() => {
-        let userProfileUnsubscribe = null;
-        let sessionsUnsubscribe = null;
-        let subscriptionsUnsubscribe = null;
-
-        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-            try {
-                if (user && !user.isAnonymous) {
-                    const isValid = await checkSessionValidity(user);
-                    if (!isValid) return;
-
-                    await registerSession(user);
-                    setCurrentUser(user);
-                    
-                    // Profile Listener
-                    const userRef = doc(db, 'users', user.uid);
-                    userProfileUnsubscribe = onSnapshot(userRef, async (doc) => {
-                        if (doc.exists()) {
-                            setCurrentUserProfile(doc.data());
-                        } else {
-                            // CREATE PROFILE HERE
-                            const name = user.displayName || `User-${user.uid.substring(0, 6)}`;
-                            const profilePic = user.photoURL || `https://placehold.co/128x128/7c3aed/ffffff?text=${name[0].toUpperCase()}`;
-                            const newProfile = { email: user.email, name: name, createdAt: serverTimestamp(), description: "Welcome to my channel!", profilePictureUrl: profilePic };
-                            await setDoc(userRef, newProfile);
-                            setCurrentUserProfile(newProfile);
-                        }
-                    });
-
-                    // Sessions Listener
-                    const sessionsRef = collection(db, `users/${user.uid}/sessions`);
-                    sessionsUnsubscribe = onSnapshot(sessionsRef, (snapshot) => {
-                         setSessions(snapshot.docs.map(d => ({id: d.id, ...d.data()})));
-                    });
-
-                    // Subscriptions Listener
-                    const subsQuery = query(collection(db, 'subscribers'), where("subscriberId", "==", user.uid));
-                    subscriptionsUnsubscribe = onSnapshot(subsQuery, (snapshot) => {
-                        setMySubscriptions(snapshot.docs.map(d => d.data().uploaderId));
-                    });
-
-                } else if (user && user.isAnonymous) {
-                    setCurrentUser(user);
-                    setCurrentUserProfile(null);
-                } else {
-                    setCurrentUser(null);
-                    setCurrentUserProfile(null);
-                    setSessions([]);
-                    setMySubscriptions([]);
-                    if (userProfileUnsubscribe) userProfileUnsubscribe();
-                    if (sessionsUnsubscribe) sessionsUnsubscribe();
-                    if (subscriptionsUnsubscribe) subscriptionsUnsubscribe();
-                }
-            } catch (error) {
-                console.error("Auth Error (Ignored for safety):", error);
-            } finally {
-                 setIsAuthReady(true);
-            }
-        });
-
-        // Data Listeners
-        const unsubVideos = onSnapshot(query(collection(db, 'videos')), (s) => {
-            setAllVideos(s.docs.map(d=>({id: d.id, ...d.data()})).sort((a,b)=>(b.createdAt?.toMillis()||0)-(a.createdAt?.toMillis()||0)));
-        }, console.error);
-
-        const unsubBytes = onSnapshot(query(collection(db, 'bytes')), (s) => {
-            setAllBytes(s.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>(b.createdAt?.toMillis()||0)-(a.createdAt?.toMillis()||0)));
-        }, console.error);
-
-        return () => { 
-            unsubscribeAuth(); 
-            unsubVideos(); 
-            unsubBytes(); 
-            if (userProfileUnsubscribe) userProfileUnsubscribe(); 
-            if (subscriptionsUnsubscribe) subscriptionsUnsubscribe();
-        };
-    }, []); 
-    
-    const showMessageHandler = (text, type = 'info') => { setMessage({ text, type }); setTimeout(() => setMessage(null), 4000); };
-    const handleGuestLogin = async () => { try { await signInAnonymously(auth); setView('home'); } catch (e) { showMessageHandler("Could not sign in as guest.", 'error'); }};
-    const handleSignup = async (email, password) => { try { await createUserWithEmailAndPassword(auth, email, password); showMessageHandler('Account created!', 'success'); setView('home'); } catch (e) { showMessageHandler(e.message, 'error'); }};
-    const handleLogin = async (email, password) => { try { await signInWithEmailAndPassword(auth, email, password); showMessageHandler('Logged in!', 'success'); setView('home'); } catch (e) { showMessageHandler(e.message, 'error'); }};
-    const handleProviderLogin = async (providerMethod) => { 
-        let provider;
-        switch(providerMethod) {
-            case 'google': provider = new GoogleAuthProvider(); break;
-            case 'github': provider = new GithubAuthProvider(); break;
-            case 'yahoo': provider = new OAuthProvider('yahoo.com'); break;
-            default: return;
-        }
-        try { 
-            await setPersistence(auth, browserLocalPersistence); 
-            await signInWithPopup(auth, provider); 
-            setView('home'); 
-            showMessageHandler(`Logged in with ${providerMethod}!`, 'success'); 
-        } catch (error) { console.error(error); showMessageHandler(error.message, 'error'); }
-    };
-    const handleLogout = async () => { 
-        try { 
-            if (currentUser && localStorage.getItem('sessionId')) { await deleteDoc(doc(db, `users/${currentUser.uid}/sessions`, localStorage.getItem('sessionId'))); }
-            localStorage.removeItem('sessionId');
-            await signOut(auth); 
-            setView('landing'); 
-            showMessageHandler('Logged out.', 'success'); 
-        } 
-        catch (e) { showMessageHandler('Failed to log out.', 'error'); }
     };
 
     const handleNavigateToChannel = (userId) => { setViewingChannelId(userId); setView('channel'); };
@@ -806,7 +778,7 @@ function App() {
     const handleSetView = (view) => { if (view !== 'upload') { setDefaultUploadType('video'); } setView(view); setSearchTerm(''); };
 
     const handleUpload = async ({ videoFile, thumbnailFile, title, description, type, onProgress }) => {
-        if (!currentUser || !currentUserProfile) { showMessageHandler('You must be logged in to upload.', 'error'); return; }
+        if (!currentUser) { showMessageHandler('You must be logged in to upload.', 'error'); return; }
         const uploadFile = (file, path, cb) => new Promise((res, rej) => { const task = uploadBytesResumable(ref(storage, path), file); task.on('state_changed', (s) => cb && cb((s.bytesTransferred / s.totalBytes) * 100), rej, async () => res(await getDownloadURL(task.snapshot.ref))); });
         try { 
             const timestamp = Date.now(); 
@@ -814,9 +786,9 @@ function App() {
             let thumbnailUrl = null;
             if (thumbnailFile) { thumbnailUrl = await uploadFile(thumbnailFile, `content/${currentUser.uid}/${timestamp}_${thumbnailFile.name}`, null); } 
             else { thumbnailUrl = type === 'byte' ? `https://placehold.co/400x600/7c3aed/ffffff?text=${encodeURIComponent(title)}` : `https://placehold.co/600x400/4338ca/ffffff?text=${encodeURIComponent(title)}`; }
-            await addDoc(collection(db, `${type}s`), { title, description, videoUrl, thumbnailUrl, uploaderId: currentUser.uid, uploaderName: currentUserProfile.name || 'User', createdAt: serverTimestamp() }); 
+            await addDoc(collection(db, `${type}s`), { title, description, videoUrl, thumbnailUrl, uploaderId: currentUser.uid, uploaderName: currentUserProfile?.name || currentUser.displayName || 'User', createdAt: serverTimestamp() }); 
             showMessageHandler(`${type.charAt(0).toUpperCase() + type.slice(1)} uploaded!`, 'success'); handleSetView('home'); 
-        } catch (e) { console.error(e); showMessageHandler('Upload failed. Please try again.', 'error'); }
+        } catch (e) { console.error(e); showMessageHandler('Upload failed. Check Storage rules.', 'error'); }
     };
 
     const handleSubscribe = async (uploaderId) => {
@@ -835,17 +807,18 @@ function App() {
         if (!currentUser) return;
         const userRef = doc(db, 'users', currentUser.uid);
         const updateData = { name, description };
-        if (profileImageFile) { const uploadFile = (file, path) => new Promise((res, rej) => { const task = uploadBytesResumable(ref(storage, path), file); task.on('state_changed', null, rej, async () => res(await getDownloadURL(task.snapshot.ref))); }); try { const newProfilePictureUrl = await uploadFile(profileImageFile, `profile-pictures/${currentUser.uid}/${Date.now()}_${profileImageFile.name}`); updateData.profilePictureUrl = newProfilePictureUrl; } catch (error) { showMessageHandler('Failed to upload profile picture.', 'error'); return; } }
-        await updateDoc(userRef, updateData);
-        if (name !== currentUserProfile.name) {
-            const videosQuery = query(collection(db, 'videos'), where("uploaderId", "==", currentUser.uid));
-            const bytesQuery = query(collection(db, 'bytes'), where("uploaderId", "==", currentUser.uid));
-            const [videoDocs, byteDocs] = await Promise.all([getDocs(videosQuery), getDocs(bytesQuery)]);
-            const updatePromises = [];
-            videoDocs.forEach(d => updatePromises.push(updateDoc(d.ref, { uploaderName: name })));
-            byteDocs.forEach(d => updatePromises.push(updateDoc(d.ref, { uploaderName: name })));
-            await Promise.all(updatePromises);
+        if (profileImageFile) { 
+            const uploadFile = (file, path) => new Promise((res, rej) => { const task = uploadBytesResumable(ref(storage, path), file); task.on('state_changed', null, rej, async () => res(await getDownloadURL(task.snapshot.ref))); }); 
+            try { 
+                const newProfilePictureUrl = await uploadFile(profileImageFile, `profile-pictures/${currentUser.uid}/${Date.now()}_${profileImageFile.name}`); 
+                updateData.profilePictureUrl = newProfilePictureUrl; 
+            } catch (error) { 
+                showMessageHandler('Failed to upload profile picture.', 'error'); 
+                return; 
+            } 
         }
+        await setDoc(userRef, updateData, { merge: true });
+        setCurrentUserProfile(prev => ({ ...prev, ...updateData }));
         showMessageHandler('Profile updated successfully!', 'success');
     };
 
