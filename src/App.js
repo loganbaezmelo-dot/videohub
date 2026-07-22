@@ -501,7 +501,8 @@ const WatchView = ({ video, onBack, onSubscribe, onNavigateToChannel, currentUse
     );
 };
 
-const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChannel, currentUser, showMessage }) => {
+// --- BYTES PLAYER: READS FROM LIVE ALLBYTES + FIXES COMMENT SAVING ---
+const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChannel, currentUser, currentUserProfile, showMessage }) => {
     const [currentIndex, setCurrentIndex] = useState(startIndex);
     const [likesCount, setLikesCount] = useState(0);
     const [hasLiked, setHasLiked] = useState(false);
@@ -527,6 +528,7 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
 
     useEffect(() => { if (videoRef.current) videoRef.current.play().catch(() => {}); }, [currentIndex]);
 
+    // Likes Listener
     useEffect(() => {
         if (!currentByte) return;
         const likesQuery = query(collection(db, 'likes'), where("contentId", "==", currentByte.id));
@@ -539,6 +541,7 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
         return () => unsubscribe();
     }, [currentByte, currentUser]);
 
+    // Comments Listener
     useEffect(() => {
         if (!currentByte || !showComments) return;
         const commentsQuery = query(collection(db, `bytes/${currentByte.id}/comments`));
@@ -568,13 +571,19 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
         if (!newCommentText.trim()) return;
         if (!currentUser) { showMessage("Please log in to comment.", "error"); return; }
 
-        await addDoc(collection(db, `bytes/${currentByte.id}/comments`), {
-            text: newCommentText.trim(),
-            userName: currentUser.displayName || 'User',
-            userId: currentUser.uid,
-            createdAt: serverTimestamp()
-        });
-        setNewCommentText('');
+        try {
+            const authorName = currentUserProfile?.name || currentUser.displayName || 'User';
+            await addDoc(collection(db, `bytes/${currentByte.id}/comments`), {
+                text: newCommentText.trim(),
+                userName: authorName,
+                userId: currentUser.uid,
+                createdAt: serverTimestamp()
+            });
+            setNewCommentText('');
+        } catch (err) {
+            console.error(err);
+            showMessage("Failed to post comment.", "error");
+        }
     };
 
     const handleTouchStart = (e) => touchStartY.current = e.targetTouches[0].clientY;
@@ -879,7 +888,7 @@ function App() {
     const [view, setView] = useState('home');
     const [authMode, setAuthMode] = useState('login');
     const [watchingContent, setWatchingContent] = useState(null);
-    const [bytesPlayerData, setBytesPlayerData] = useState({ items: [], index: 0 });
+    const [bytesStartIndex, setBytesStartIndex] = useState(0);
     const [searchTerm, setSearchTerm] = useState('');
     const [viewingChannelId, setViewingChannelId] = useState(null);
 
@@ -1057,8 +1066,27 @@ function App() {
     };
 
     const handleNavigateToChannel = (userId) => { setViewingChannelId(userId); setView('channel'); };
-    const handleWatchContent = (item) => { if (item.type === 'byte') { const itemIndex = allBytes.findIndex(b => b.id === item.id); setBytesPlayerData({ items: allBytes, index: itemIndex >= 0 ? itemIndex : 0 }); setView('bytesPlayer'); } else { setWatchingContent(item); setView('watch'); }};
-    const handleNavigateToBytes = () => { if (allBytes.length > 0) { setBytesPlayerData({ items: allBytes, index: 0 }); setView('bytesPlayer'); } else { setIsNoBytesModalOpen(true); }};
+    const handleWatchContent = (item) => { 
+        if (item.type === 'byte') { 
+            const itemIndex = allBytes.findIndex(b => b.id === item.id); 
+            setBytesStartIndex(itemIndex >= 0 ? itemIndex : 0); 
+            setView('bytesPlayer'); 
+        } else { 
+            setWatchingContent(item); 
+            setView('watch'); 
+        }
+    };
+
+    // FIXED: Checks live allBytes array directly
+    const handleNavigateToBytes = () => { 
+        if (allBytes.length > 0) { 
+            setBytesStartIndex(0); 
+            setView('bytesPlayer'); 
+        } else { 
+            setIsNoBytesModalOpen(true); 
+        }
+    };
+
     const handleGoToUploadFromModal = () => { setIsNoBytesModalOpen(false); setDefaultUploadType('byte'); setView('upload'); };
     const handleSetView = (view) => { if (view !== 'upload') { setDefaultUploadType('video'); } setView(view); setSearchTerm(''); };
 
@@ -1186,7 +1214,7 @@ function App() {
             case 'watch': 
                 return <WatchView video={watchingContent} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} />;
             case 'bytesPlayer': 
-                return <BytesPlayer bytes={bytesPlayerData.items} startIndex={bytesPlayerData.index} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} showMessage={showMessageHandler} />;
+                return <BytesPlayer bytes={allBytes} startIndex={bytesStartIndex} onBack={() => handleSetView('home')} onSubscribe={handleSubscribe} onNavigateToChannel={handleNavigateToChannel} currentUser={currentUser} currentUserProfile={currentUserProfile} showMessage={showMessageHandler} />;
             case 'channel': 
                 return <ChannelPage userId={viewingChannelId} currentUser={currentUser} allVideos={allVideos} allBytes={allBytes} onWatch={handleWatchContent} onNavigateToChannel={handleNavigateToChannel} onSubscribe={handleSubscribe} onEditProfile={handleOpenEditModal} />;
             case 'home': 
