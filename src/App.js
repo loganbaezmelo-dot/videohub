@@ -38,7 +38,7 @@ const getDeviceName = () => {
     return 'Unknown Device';
 };
 
-// --- Canvas Compression Helper ---
+// --- Fixed Canvas Compression Helper ---
 const compressVideo = (file, targetHeight, onProgress) => {
     return new Promise((resolve, reject) => {
         const video = document.createElement('video');
@@ -64,17 +64,31 @@ const compressVideo = (file, targetHeight, onProgress) => {
             
             let stream;
             try {
-                stream = canvas.captureStream(25);
+                stream = canvas.captureStream(25); // 25 FPS
             } catch (err) {
                 cleanup();
                 return reject(err);
             }
 
+            // Target bitrates tailored to output resolution to stay under 770 KB
+            let targetBitrate = 400000; // 400 kbps
+            if (targetHeight <= 144) targetBitrate = 150000;
+            else if (targetHeight <= 360) targetBitrate = 300000;
+
             let mediaRecorder;
+            const recorderOptions = { 
+                mimeType: 'video/webm;codecs=vp8',
+                videoBitsPerSecond: targetBitrate 
+            };
+
             try {
-                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                mediaRecorder = new MediaRecorder(stream, recorderOptions);
             } catch (e) {
-                mediaRecorder = new MediaRecorder(stream);
+                try {
+                    mediaRecorder = new MediaRecorder(stream, { videoBitsPerSecond: targetBitrate });
+                } catch (err) {
+                    mediaRecorder = new MediaRecorder(stream);
+                }
             }
 
             const chunks = [];
@@ -98,18 +112,33 @@ const compressVideo = (file, targetHeight, onProgress) => {
                 }
             };
 
+            let lastProgressTime = 0;
+            let animFrameId = null;
+
             video.play().then(() => {
                 mediaRecorder.start(100);
+
                 const drawFrame = () => {
-                    if (video.paused || video.ended) return;
+                    if (video.paused || video.ended) {
+                        if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+                        return;
+                    }
+
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    if (onProgress && video.duration) {
+
+                    // Throttle React state updates to once every 250ms (prevents UI/DOM lockups)
+                    const now = Date.now();
+                    if (onProgress && video.duration && (now - lastProgressTime > 250)) {
+                        lastProgressTime = now;
                         onProgress(Math.round((video.currentTime / video.duration) * 100));
                     }
-                    requestAnimationFrame(drawFrame);
+
+                    animFrameId = requestAnimationFrame(drawFrame);
                 };
+
                 drawFrame();
             }).catch((err) => {
+                if (animFrameId) cancelAnimationFrame(animFrameId);
                 cleanup();
                 reject(err);
             });
@@ -436,7 +465,7 @@ const UploadForm = ({ onUpload, showMessage, defaultType }) => {
 
                 {fileSizeExceeded && (
                     <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-500 text-sm">
-                        ⚠️ <strong>File size exceeds 1 MB limit!</strong> Direct Base64 upload will fail. Select a lower resolution to compress it:
+                        ⚠️ <strong>File size exceeds 770 KB limit!</strong> Direct Base64 upload will fail. Select a resolution below to compress it:
                     </div>
                 )}
 
@@ -1113,8 +1142,8 @@ function App() {
                 
                 finalVideoUrl = compressionResult.dataUrl;
                 
-                if (compressionResult.blobSize > 750000) {
-                    showMessageHandler(`Warning: Compressed video exceeds 1MB limit. Try 144p or 360p.`, 'error');
+                if (compressionResult.blobSize > 770000) {
+                    showMessageHandler(`Warning: Compressed video exceeds 770KB limit. Try 144p or 360p.`, 'error');
                 }
             } else {
                 if (onProgress) onProgress(50);
