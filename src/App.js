@@ -78,7 +78,7 @@ const compressVideo = (file, targetHeight, onProgress) => {
             canvas.width = Math.round(targetHeight * aspectRatio);
             
             try {
-                stream = canvas.captureStream(24); // 24 FPS saves significant memory
+                stream = canvas.captureStream(24);
             } catch (err) {
                 cleanup();
                 return reject(err);
@@ -137,7 +137,7 @@ const compressVideo = (file, targetHeight, onProgress) => {
             video.onended = stopRecording;
 
             video.play().then(() => {
-                mediaRecorder.start(250); // 250ms chunks to stop UI freezing
+                mediaRecorder.start(250);
 
                 const drawFrame = () => {
                     if (video.paused || video.ended) {
@@ -176,7 +176,11 @@ const Message = ({ message }) => {
     if (!message) return null;
     const { text, type } = message;
     const bgColor = type === 'error' ? 'bg-red-500' : 'bg-green-500';
-    return <div className={`fixed top-5 right-5 ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in-out z-[9999]`}>{text}</div>;
+    return (
+        <div className={`fixed top-5 right-5 ${bgColor} text-white px-4 py-2 rounded-lg shadow-lg animate-fade-in-out z-[9999]`}>
+            {text}
+        </div>
+    );
 };
 
 const SubscriberCount = ({ uploaderId }) => {
@@ -1289,7 +1293,9 @@ function App() {
             {isNoBytesModalOpen && <NoBytesModal onGoToUpload={handleGoToUploadFromModal} onCancel={() => setIsNoBytesModalOpen(false)} />}
             {isSettingsModalOpen && <SettingsModal theme={theme} onThemeChange={handleThemeChange} onCancel={() => setIsSettingsModalOpen(false)} currentUser={currentUser} onLinkAccount={handleLinkAccount} sessions={sessions} onRevokeSession={handleRevokeSession} />}
             
-            <main className={view === 'bytesPlayer' ? '' : 'container mx-auto max-w-7xl px-2'}>{renderContent()}</main>
+            <main className={view === 'bytesPlayer' ? '' : 'container mx-auto max-w-7xl px-2'}>
+                {renderContent()}
+            </main>
         </div>
     );
 }
