@@ -43,52 +43,65 @@ const compressVideo = (file, targetHeight, onProgress) => {
     return new Promise((resolve, reject) => {
         const video = document.createElement('video');
         video.muted = true;
+        video.defaultMuted = true;
         video.playsInline = true;
         video.preload = 'auto';
         
         const videoUrl = URL.createObjectURL(file);
         video.src = videoUrl;
 
+        let animFrameId = null;
+        let stream = null;
+        let mediaRecorder = null;
+
         const cleanup = () => {
+            if (animFrameId) cancelAnimationFrame(animFrameId);
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                try { mediaRecorder.stop(); } catch (_) {}
+            }
+            video.pause();
+            video.removeAttribute('src');
+            video.load();
             URL.revokeObjectURL(videoUrl);
             video.remove();
         };
 
         video.onloadedmetadata = () => {
             const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
+            const ctx = canvas.getContext('2d', { alpha: false });
             
-            const aspectRatio = video.videoWidth / video.videoHeight;
+            const aspectRatio = (video.videoWidth || 16) / (video.videoHeight || 9);
             canvas.height = targetHeight;
             canvas.width = Math.round(targetHeight * aspectRatio);
             
-            let stream;
             try {
-                stream = canvas.captureStream(25); // 25 FPS
+                stream = canvas.captureStream(24); // 24 FPS saves significant memory
             } catch (err) {
                 cleanup();
                 return reject(err);
             }
 
-            // Target bitrates tailored to output resolution to stay under 770 KB
-            let targetBitrate = 400000; // 400 kbps
-            if (targetHeight <= 144) targetBitrate = 150000;
-            else if (targetHeight <= 360) targetBitrate = 300000;
+            let targetBitrate = 350000;
+            if (targetHeight <= 144) targetBitrate = 120000;
+            else if (targetHeight <= 360) targetBitrate = 250000;
 
-            let mediaRecorder;
-            const recorderOptions = { 
-                mimeType: 'video/webm;codecs=vp8',
-                videoBitsPerSecond: targetBitrate 
-            };
+            const mimeTypes = [
+                'video/webm;codecs=vp8',
+                'video/webm',
+                'video/mp4'
+            ];
+            const selectedMimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) || '';
 
             try {
-                mediaRecorder = new MediaRecorder(stream, recorderOptions);
-            } catch (e) {
-                try {
-                    mediaRecorder = new MediaRecorder(stream, { videoBitsPerSecond: targetBitrate });
-                } catch (err) {
-                    mediaRecorder = new MediaRecorder(stream);
-                }
+                mediaRecorder = selectedMimeType 
+                    ? new MediaRecorder(stream, { mimeType: selectedMimeType, videoBitsPerSecond: targetBitrate })
+                    : new MediaRecorder(stream, { videoBitsPerSecond: targetBitrate });
+            } catch (err) {
+                cleanup();
+                return reject(err);
             }
 
             const chunks = [];
@@ -97,40 +110,47 @@ const compressVideo = (file, targetHeight, onProgress) => {
             };
 
             mediaRecorder.onstop = () => {
-                const blob = new Blob(chunks, { type: 'video/webm' });
+                const finalType = selectedMimeType || 'video/webm';
+                const blob = new Blob(chunks, { type: finalType });
+                
                 const reader = new FileReader();
-                reader.readAsDataURL(blob);
                 reader.onloadend = () => {
+                    const result = reader.result;
                     cleanup();
-                    resolve({ dataUrl: reader.result, blobSize: blob.size });
+                    resolve({ dataUrl: result, blobSize: blob.size });
                 };
+                reader.onerror = (readErr) => {
+                    cleanup();
+                    reject(readErr);
+                };
+                reader.readAsDataURL(blob);
             };
 
-            video.onended = () => {
-                if (mediaRecorder.state !== 'inactive') {
+            let lastProgressTime = 0;
+
+            const stopRecording = () => {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
                     mediaRecorder.stop();
                 }
             };
 
-            let lastProgressTime = 0;
-            let animFrameId = null;
+            video.onended = stopRecording;
 
             video.play().then(() => {
-                mediaRecorder.start(100);
+                mediaRecorder.start(250); // 250ms chunks to stop UI freezing
 
                 const drawFrame = () => {
                     if (video.paused || video.ended) {
-                        if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+                        stopRecording();
                         return;
                     }
 
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                    // Throttle React state updates to once every 250ms (prevents UI/DOM lockups)
                     const now = Date.now();
-                    if (onProgress && video.duration && (now - lastProgressTime > 250)) {
+                    if (onProgress && video.duration && (now - lastProgressTime > 300)) {
                         lastProgressTime = now;
-                        onProgress(Math.round((video.currentTime / video.duration) * 100));
+                        onProgress(Math.min(95, Math.round((video.currentTime / video.duration) * 100)));
                     }
 
                     animFrameId = requestAnimationFrame(drawFrame);
@@ -138,7 +158,6 @@ const compressVideo = (file, targetHeight, onProgress) => {
 
                 drawFrame();
             }).catch((err) => {
-                if (animFrameId) cancelAnimationFrame(animFrameId);
                 cleanup();
                 reject(err);
             });
@@ -570,7 +589,7 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
         return () => unsubscribe();
     }, [currentByte, currentUser]);
 
-    // Comments Listener (Queries root 'comments' collection to avoid subcollection permission blocks)
+    // Comments Listener
     useEffect(() => {
         if (!currentByte || !showComments) return;
         const commentsQuery = query(collection(db, 'comments'), where("byteId", "==", currentByte.id));
@@ -642,7 +661,7 @@ const BytesPlayer = ({ bytes, startIndex, onBack, onSubscribe, onNavigateToChann
 
                     <button onClick={() => setShowComments(!showComments)} className="flex flex-col items-center group">
                         <div className="p-3 rounded-full bg-gray-900/60 backdrop-blur-md text-white hover:bg-gray-800 transition-all active:scale-90">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
                         </div>
                         <span className="text-white text-xs font-bold mt-1 shadow-sm">Chat</span>
                     </button>
